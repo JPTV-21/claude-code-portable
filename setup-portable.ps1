@@ -23,7 +23,7 @@ param(
     [switch]$NoClaudex,
     [switch]$NoClaude,
     [ValidateSet('auto', 'windows', 'macos', 'linux', 'all')][string]$Platform = 'auto',
-    [ValidateSet('auto', 'x64', 'arm64')][string]$Architecture = 'auto',
+    [ValidateSet('auto', 'x64', 'arm64', 'all')][string]$Architecture = 'auto',
     [string]$InstallDir = '',
     [switch]$All,
     [switch]$Yes,
@@ -56,7 +56,7 @@ function Show-Usage {
   -NoClaudex            跳过 ClaudeX 的下载/更新
   -NoClaude             跳过 Claude Code 的下载/更新
   -Platform PLATFORM    安装平台：windows/macos/linux/all（默认检测当前系统）
-  -Architecture ARCH    CPU 架构：x64/arm64（默认检测当前系统）
+  -Architecture ARCH    CPU 架构：x64/arm64/all（默认检测当前系统）
   -All                  下载全部 6 个平台/架构组合，每项放入独立子目录
   -InstallDir DIR       安装目录（默认脚本所在目录）
   -Yes                  使用默认值，不进行交互询问
@@ -611,7 +611,8 @@ try {
 
     $interactive = (-not $Yes) -and [Environment]::UserInteractive
 
-    $allTargets = $All -or ($Platform -eq 'all')
+    $platformAll = $All -or ($Platform -eq 'all')
+    $archAll = $All -or ($Architecture -eq 'all')
 
     if ($Platform -ne 'auto') {
         $script:TargetPlatform = $Platform
@@ -619,16 +620,18 @@ try {
         $script:TargetPlatform = Read-Choice -Prompt '安装平台' -Default $script:TargetPlatform `
             -Choices @('windows', 'macos', 'linux', 'all')
     }
-    if ($script:TargetPlatform -eq 'all') { $allTargets = $true }
+    if ($script:TargetPlatform -eq 'all') { $platformAll = $true }
 
-    if (-not $allTargets) {
-        if ($Architecture -ne 'auto') {
-            $script:TargetArch = $Architecture
-        } elseif ($interactive) {
-            $script:TargetArch = Read-Choice -Prompt 'CPU 架构' -Default $script:TargetArch `
-                -Choices @('x64', 'arm64')
-        }
+    $defaultArch = if ($platformAll) { 'all' } else { $script:TargetArch }
+    if ($Architecture -ne 'auto') {
+        $script:TargetArch = $Architecture
+    } elseif ($interactive) {
+        $script:TargetArch = Read-Choice -Prompt 'CPU 架构' -Default $defaultArch `
+            -Choices @('x64', 'arm64', 'all')
+    } elseif ($platformAll) {
+        $script:TargetArch = 'all'
     }
+    if ($script:TargetArch -eq 'all') { $archAll = $true }
 
     if ($interactive -and [string]::IsNullOrWhiteSpace($InstallDir)) {
         $answer = Read-Host "安装目录 [$script:Root]"
@@ -636,10 +639,20 @@ try {
     }
     $baseRoot = Resolve-InstallDir -Dir $InstallDir
 
+    $platforms = if ($platformAll) { @('windows', 'macos', 'linux') } else { @($script:TargetPlatform) }
+    $arches = if ($archAll) { @('x64', 'arm64') } else { @($script:TargetArch) }
+    $targets = @()
+    foreach ($p in $platforms) {
+        foreach ($a in $arches) {
+            $targets += [pscustomobject]@{ Platform = $p; Arch = $a }
+        }
+    }
+    $multiTarget = $targets.Count -gt 1
+
     Write-Host '便携版 Claude Code 一键部署（PowerShell）' -ForegroundColor White
     Write-Host "  安装目录: $baseRoot"
-    if ($allTargets) {
-        Write-Host '  目标平台: 全部（每项一个子目录）'
+    if ($multiTarget) {
+        Write-Host "  目标平台: $($targets.Count) 个组合（每项一个子目录）"
     } else {
         Write-Host "  目标平台: $script:TargetPlatform $script:TargetArch"
         if ($script:TargetPlatform -ne 'windows') {
@@ -648,25 +661,12 @@ try {
     }
     Write-Host ''
 
-    if ($allTargets) {
-        $targets = @(
-            [pscustomobject]@{ Platform = 'windows'; Arch = 'x64' },
-            [pscustomobject]@{ Platform = 'windows'; Arch = 'arm64' },
-            [pscustomobject]@{ Platform = 'macos';   Arch = 'x64' },
-            [pscustomobject]@{ Platform = 'macos';   Arch = 'arm64' },
-            [pscustomobject]@{ Platform = 'linux';   Arch = 'x64' },
-            [pscustomobject]@{ Platform = 'linux';   Arch = 'arm64' }
-        )
-    } else {
-        $targets = @([pscustomobject]@{ Platform = $script:TargetPlatform; Arch = $script:TargetArch })
-    }
-
     $script:InstalledTargets = @()
     foreach ($target in $targets) {
         $script:TargetPlatform = $target.Platform
         $script:TargetArch = $target.Arch
 
-        if ($allTargets) {
+        if ($multiTarget) {
             $script:Root = Join-Path $baseRoot ("$($target.Platform)-$($target.Arch)")
             New-Item -ItemType Directory -Force -Path $script:Root | Out-Null
             Write-Step "安装 $($target.Platform)/$($target.Arch) → $script:Root"
@@ -685,7 +685,7 @@ try {
         }
     }
 
-    Show-Summary -BaseRoot $baseRoot -Multi:$allTargets
+    Show-Summary -BaseRoot $baseRoot -Multi:$multiTarget
 } catch {
     Write-Err $_.Exception.Message
     exit 1

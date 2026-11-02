@@ -51,7 +51,9 @@ The POSIX script uses only standard system tools: `sh`, `curl`, `perl` with
 ## What the scripts do
 
 - Detect the current platform and architecture and use them as defaults.
-- Let you pick another target or `all` (six combinations).
+- Let you pick another target. Both the platform prompt and the architecture
+  prompt accept `all`: platform `all` covers Windows/macOS/Linux, architecture
+  `all` covers x64/arm64, and `all` in both gives the six combinations.
 - Download the matching ClaudeX release and Claude Code CLI with retry and
   byte-range resume.
 - Show a live progress meter with transferred/total size and speed.
@@ -95,7 +97,7 @@ Each folder contains its own launcher, `claudex-config.json`, `data/`, and
 | `-NoClaudex` | `--no-claudex` | Skip the launcher download |
 | `-NoClaude` | `--no-claude` | Skip the Claude Code download |
 | `-Platform P` | `--platform P` | `windows`, `macos`, `linux`, or `all` |
-| `-Architecture A` | `--arch A` | `x64` or `arm64` |
+| `-Architecture A` | `--arch A` | `x64`, `arm64`, or `all` |
 | `-All` | `--all` | Install all six platform/architecture combinations |
 | `-InstallDir D` | `--install-dir D` | Installation directory |
 | `-Yes` | `--yes` | Non-interactive; use defaults and explicit options |
@@ -108,6 +110,7 @@ Each folder contains its own launcher, `claudex-config.json`, `data/`, and
 
 ```powershell
 .\setup-portable.ps1 -All -InstallDir D:\ClaudexAll -Yes
+.\setup-portable.ps1 -Platform windows -Architecture all -InstallDir D:\ClaudexWin -Yes
 .\setup-portable.ps1 -Platform macos -Architecture arm64 -NoClaude -Yes
 ```
 

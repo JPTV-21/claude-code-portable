@@ -76,6 +76,8 @@ PLATFORM_OVERRIDE=""
 ARCH_OVERRIDE=""
 INSTALL_DIR_OVERRIDE=""
 ALL_TARGETS=0
+ALL_ARCH=0
+MULTI_TARGETS=""
 BASE_ROOT=""
 ASSUME_YES=0
 INTERACTIVE=0
@@ -227,7 +229,7 @@ ClaudeX、data/ 和 bin/ 的根目录。
       --no-claudex         跳过 ClaudeX 的下载/更新
       --no-claude          跳过 Claude Code 的下载/更新
       --platform OS        安装平台：windows/macos/linux/all（默认检测）
-      --arch ARCH          CPU 架构：x64/arm64（默认检测）
+      --arch ARCH          CPU 架构：x64/arm64/all（默认检测）
       --all                下载全部 6 个平台/架构组合，每项一个子目录
       --install-dir DIR    安装目录（默认脚本所在目录）
   -y, --yes                使用默认值，不进行交互询问
@@ -303,6 +305,7 @@ parse_args() {
                 ;;
             --all)
                 ALL_TARGETS=1
+                ALL_ARCH=1
                 ;;
             --platform)
                 [ "$#" -ge 2 ] || usage_error "--platform 需要一个平台名"
@@ -500,9 +503,7 @@ prompt_platform_arch() {
     fi
 
     [ -z "$PLATFORM_OVERRIDE" ] || OS=$PLATFORM_OVERRIDE
-    if [ "$ALL_TARGETS" -eq 0 ]; then
-        [ -z "$ARCH_OVERRIDE" ] || ARCH=$ARCH_OVERRIDE
-    fi
+    [ -z "$ARCH_OVERRIDE" ] || ARCH=$ARCH_OVERRIDE
 
     if [ "$INTERACTIVE" -eq 1 ]; then
         printf '安装平台 [%s] (windows/macos/linux/all): ' "$OS"
@@ -513,15 +514,18 @@ prompt_platform_arch() {
             *) warn "无效平台：$answer，使用 $OS" ;;
         esac
 
-        if [ "$OS" != "all" ]; then
-            printf 'CPU 架构 [%s] (x64/arm64): ' "$ARCH"
-            read answer || answer=""
-            case "$answer" in
-                "") ;;
-                x64|arm64) ARCH=$answer ;;
-                *) warn "无效架构：$answer，使用 $ARCH" ;;
-            esac
-        fi
+        default_arch=$ARCH
+        [ "$OS" = "all" ] && default_arch=all
+        printf 'CPU 架构 [%s] (x64/arm64/all): ' "$default_arch"
+        read answer || answer=""
+        case "$answer" in
+            "") ARCH=$default_arch ;;
+            x64|arm64|all) ARCH=$answer ;;
+            *) warn "无效架构：$answer，使用 $default_arch" ;;
+        esac
+    elif [ -z "$ARCH_OVERRIDE" ] && [ "$OS" = "all" ]; then
+        # Platform "all" without an explicit arch keeps the six-target default.
+        ARCH=all
     fi
 
     case "$OS" in
@@ -529,17 +533,21 @@ prompt_platform_arch() {
         all) ALL_TARGETS=1 ;;
         *) die "不支持的平台：$OS" ;;
     esac
+    case "$ARCH" in
+        x64|arm64) ;;
+        all) ALL_ARCH=1 ;;
+        *) die "不支持的架构：$ARCH" ;;
+    esac
 
-    if [ "$ALL_TARGETS" -eq 1 ]; then
-        info "将下载全部 6 个平台/架构组合，每项一个子目录。"
-    else
-        case "$ARCH" in
-            x64|arm64) ;;
-            *) die "不支持的架构：$ARCH" ;;
-        esac
-        if [ "$OS" != "$DETECTED_OS" ] || [ "$ARCH" != "$DETECTED_ARCH" ]; then
-            info "将下载 $OS/$ARCH 版本（不会在本机运行）。"
-        fi
+    platform_count=1
+    [ "$ALL_TARGETS" -eq 1 ] && platform_count=3
+    arch_count=1
+    [ "$ALL_ARCH" -eq 1 ] && arch_count=2
+    total_count=$((platform_count * arch_count))
+    if [ "$total_count" -gt 1 ]; then
+        info "将下载 $total_count 个平台/架构组合，每项一个子目录。"
+    elif [ "$OS" != "$DETECTED_OS" ] || [ "$ARCH" != "$DETECTED_ARCH" ]; then
+        info "将下载 $OS/$ARCH 版本（不会在本机运行）。"
     fi
 }
 
@@ -1859,7 +1867,7 @@ print_multi_summary() {
     say "${BOLD}================ 完成 ================${RESET}"
     say "  安装目录: $(display_path "$BASE_ROOT")"
     say "  已安装目标:"
-    for target in windows-x64 windows-arm64 macos-x64 macos-arm64 linux-x64 linux-arm64; do
+    for target in $MULTI_TARGETS; do
         platform=${target%-*}
         arch=${target#*-}
         exe=$(target_exe "$platform")
@@ -1883,8 +1891,21 @@ main() {
     check_dependencies
     setup_work
 
-    if [ "$ALL_TARGETS" -eq 1 ]; then
-        for target in windows-x64 windows-arm64 macos-x64 macos-arm64 linux-x64 linux-arm64; do
+    platforms=$OS
+    [ "$ALL_TARGETS" -eq 1 ] && platforms="windows macos linux"
+    arches=$ARCH
+    [ "$ALL_ARCH" -eq 1 ] && arches="x64 arm64"
+
+    MULTI_TARGETS=""
+    for p in $platforms; do
+        for a in $arches; do
+            MULTI_TARGETS="$MULTI_TARGETS $p-$a"
+        done
+    done
+
+    set -- $MULTI_TARGETS
+    if [ "$#" -gt 1 ]; then
+        for target in "$@"; do
             OS=${target%-*}
             ARCH=${target#*-}
             ROOT="$BASE_ROOT/$target"
@@ -1893,6 +1914,10 @@ main() {
         done
         print_multi_summary
     else
+        target=$1
+        OS=${target%-*}
+        ARCH=${target#*-}
+        ROOT=$BASE_ROOT
         install_current_target
         print_summary
     fi
