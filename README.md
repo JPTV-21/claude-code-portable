@@ -21,7 +21,7 @@ Windows PowerShell 5.1 is built into Windows 10/11. **No Git, curl, perl, or
 other tools are required.**
 
 ```powershell
-irm 'https://api.github.com/repos/JPTV-21/claude-code-portable/contents/setup-portable.ps1' -Headers @{'Accept'='application/vnd.github.raw';'User-Agent'='claudex-setup'} | iex
+$p="$env:TEMP\claudex-setup.ps1"; iwr 'https://api.github.com/repos/JPTV-21/claude-code-portable/contents/setup-portable.ps1' -Headers @{'Accept'='application/vnd.github.raw';'User-Agent'='claudex-setup'} -UseBasicParsing -OutFile $p; iex (Get-Content $p -Raw)
 ```
 
 This downloads the newest `setup-portable.ps1` from the default branch and runs
@@ -31,8 +31,7 @@ architecture, and install directory.
 To pass options to an online run:
 
 ```powershell
-$src = irm 'https://api.github.com/repos/JPTV-21/claude-code-portable/contents/setup-portable.ps1' -Headers @{'Accept'='application/vnd.github.raw';'User-Agent'='claudex-setup'}
-& ([scriptblock]::Create($src)) -All -InstallDir D:\ClaudexAll
+$p="$env:TEMP\claudex-setup.ps1"; iwr 'https://api.github.com/repos/JPTV-21/claude-code-portable/contents/setup-portable.ps1' -Headers @{'Accept'='application/vnd.github.raw';'User-Agent'='claudex-setup'} -UseBasicParsing -OutFile $p; & ([scriptblock]::Create((Get-Content $p -Raw))) -All -InstallDir D:\ClaudexAll
 ```
 
 ### Linux / macOS
