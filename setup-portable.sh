@@ -1,52 +1,52 @@
 #!/bin/sh
 # ============================================================================
-# setup-portable.sh - 一键部署便携版 ClaudeX + Claude Code
+# setup-portable.sh - one-step portable setup for ClaudeX + Claude Code
 #
-# 功能:
-#   1. 自动识别当前操作系统与 CPU 架构
-#      Windows / macOS / Linux，x64 / arm64（Linux 会自动识别 musl）
-#   2. 从 GitHub Releases 下载最新版 ClaudeX 与 Claude Code，并自动解压
-#      - ClaudeX 放在脚本所在目录 ./ClaudeX[.exe]
-#      - Claude Code 放在 ./bin/<arch>/<platform>/claude[.exe]
-#   3. 首次运行 ClaudeX 生成 claudex-config.json，随后立即关闭它
-#   4. 把配置里的 claudeConfigDir 改为 data，把 claudePath 指向
+# Features:
+#   1. Detect the current operating system and CPU architecture
+#      Windows / macOS / Linux, x64 / arm64 (musl is detected on Linux)
+#   2. Download the latest ClaudeX and Claude Code from GitHub Releases
+#      - ClaudeX goes into the script folder as ./ClaudeX[.exe]
+#      - Claude Code goes into ./bin/<arch>/<platform>/claude[.exe]
+#   3. Run ClaudeX once to generate claudex-config.json, then close it
+#   4. Point claudeConfigDir at data and claudePath at the portable Claude binary
 #      bin/<arch>/<platform>/claude*
 #
-# 目录约定（全部相对于脚本所在目录）:
-#   ./ClaudeX[.exe]                      ClaudeX 启动器
-#   ./claudex-config.json                启动器配置
-#   ./data/                              便携式 CLAUDE_CONFIG_DIR
-#   ./data/tmp/                          便携式临时目录
-#   ./bin/<arch>/<platform>/claude*      Claude Code 本体
+# Directory layout (relative to the script folder):
+#   ./ClaudeX[.exe]                      ClaudeX launcher
+#   ./claudex-config.json                launcher configuration
+#   ./data/                              portable CLAUDE_CONFIG_DIR
+#   ./data/tmp/                          portable temporary folder
+#   ./bin/<arch>/<platform>/claude*      Claude Code binary
 #
-# 三平台支持:
-#   - Linux / macOS: 直接用系统自带的 POSIX sh 运行
-#   - Windows:       通过 Git for Windows 提供的 Git Bash 运行
-#                    （脚本会处理 .exe、zip、taskkill 等 Windows 细节）
+# Platform support:
+#   - Linux / macOS: run with the system POSIX sh
+#   - Windows:       run with Git Bash from Git for Windows
+#                    (the script handles .exe, zip, taskkill, and other Windows details)
 #
-# 依赖: POSIX sh、curl、tar、perl（JSON::PP 模块）、find/awk/sed/grep
-#       Windows 解压 zip 还需要 unzip（Git Bash 自带），或 PowerShell 兜底。
+# Dependencies: POSIX sh, curl, tar, perl (JSON::PP), find/awk/sed/grep
+#       Windows zip extraction also needs unzip (bundled with Git Bash) or PowerShell as a fallback.
 #
-# 注意: 本脚本不会修改 ClaudeX 的源代码，只下载 release 并修改运行时配置。
+# Note: this script does not modify ClaudeX source code; it only downloads releases and updates the runtime config.
 # ============================================================================
 
 set -u
 export LC_ALL=C
 
 # ---------------------------------------------------------------------------
-# 常量与可覆盖配置
+# Constants and overridable settings
 # ---------------------------------------------------------------------------
 
-# TODO: ClaudeX 发布到 GitHub 后，把下面的占位符换成真实的 owner/repo。
-#       也可以运行时用 --claudex-repo owner/repo 或环境变量 CLAUDEX_REPO 覆盖。
+# TODO: after ClaudeX is published, replace the placeholder below with the real owner/repo.
+#       It can also be overridden at runtime with --claudex-repo owner/repo or CLAUDEX_REPO.
 #
-# 建议的 ClaudeX release 资产命名（脚本会自动识别平台/架构标记）:
+# Suggested ClaudeX release asset names (platform/arch markers are detected automatically):
 #   ClaudeX-windows-x64.zip       ClaudeX-windows-arm64.zip
 #   ClaudeX-macos-x64.tar.gz      ClaudeX-macos-arm64.tar.gz
 #   ClaudeX-linux-x64.tar.gz      ClaudeX-linux-arm64.tar.gz
-# 也可以直接发布裸二进制，例如 ClaudeX.exe / ClaudeX-linux-x64。
-# 压缩包内应包含名为 ClaudeX / ClaudeX.exe（大小写不敏感）的可执行文件；
-# 如果压缩包内只有一个其它名字的可执行文件，脚本也会采用它。
+# Raw binaries are also supported, for example ClaudeX.exe / ClaudeX-linux-x64.
+# The archive should contain an executable named ClaudeX / ClaudeX.exe (case-insensitive);
+# if it contains exactly one executable with another name, the script will use it.
 CLAUDEX_REPO_PLACEHOLDER="JPTV-21/Claudex"
 CLAUDEX_REPO=${CLAUDEX_REPO:-$CLAUDEX_REPO_PLACEHOLDER}
 CLAUDE_REPO=${CLAUDE_REPO:-anthropics/claude-code}
@@ -56,7 +56,7 @@ GITHUB_BASE="https://github.com"
 USER_AGENT="claudex-portable-setup/1.0"
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || {
-    printf 'error: 无法确定脚本所在目录\n' >&2
+    printf 'error: cannot determine the script directory\n' >&2
     exit 1
 }
 ROOT=$SCRIPT_DIR
@@ -117,7 +117,7 @@ ASSET_API_URL=""
 VERIFY_REF=""
 
 # ---------------------------------------------------------------------------
-# 输出辅助
+# Output helpers
 # ---------------------------------------------------------------------------
 
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ]; then
@@ -164,12 +164,12 @@ die() {
 
 usage_error() {
     err "$*"
-    say "运行 '$0 --help' 查看用法。"
+    say "Run '$0 --help' for usage."
     exit 2
 }
 
 # ---------------------------------------------------------------------------
-# 进程与临时目录清理
+# Process and temporary directory cleanup
 # ---------------------------------------------------------------------------
 
 stop_process() {
@@ -210,49 +210,49 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 # ---------------------------------------------------------------------------
-# 帮助
+# Help
 # ---------------------------------------------------------------------------
 
 usage() {
     cat <<EOF
-用法: sh $0 [选项]
+Usage: sh $0 [options]
 
-一键部署便携版 ClaudeX + Claude Code。脚本会把 ClaudeX 放在脚本所在
-目录，把 Claude Code 放在 bin/<arch>/<platform>/ 下，并自动生成/修改
-claudex-config.json。
+One-step portable setup for ClaudeX + Claude Code. The script installs ClaudeX
+into the script folder, Claude Code under bin/<arch>/<platform>, and creates
+claudex-config.json.
 
-请把本脚本放在你希望作为便携根目录的文件夹中运行；脚本所在目录就是
-ClaudeX、data/ 和 bin/ 的根目录。
+Run this script from the folder you want to use as the portable root; that folder
+becomes the root for ClaudeX, data/, and bin/.
 
-选项:
-  -u, --update             强制重新下载最新版 ClaudeX 与 Claude Code
-      --no-claudex         跳过 ClaudeX 的下载/更新
-      --no-claude          跳过 Claude Code 的下载/更新
-      --platform OS        安装平台：windows/macos/linux/all（默认检测）
-      --arch ARCH          CPU 架构：x64/arm64/all（默认检测）
-      --all                下载全部 6 个平台/架构组合，每项一个子目录
-      --install-dir DIR    安装目录（默认脚本所在目录）
-  -y, --yes                使用默认值，不进行交互询问
-      --claudex-repo REPO  指定 ClaudeX 仓库（owner/repo）
-      --claudex-asset NAME 指定 ClaudeX release 中的资产文件名
-      --claude-repo REPO   指定 Claude Code 仓库
-                           （默认 anthropics/claude-code）
-      --timeout SECONDS    等待 ClaudeX 生成配置文件的秒数（默认 20）
-  -h, --help               显示本帮助
+Options:
+  -u, --update             force re-download of the latest ClaudeX and Claude Code
+      --no-claudex         skip the ClaudeX download/update
+      --no-claude          skip the Claude Code download/update
+      --platform OS        target platform: windows/macos/linux/all (default: detected)
+      --arch ARCH          CPU architecture: x64/arm64/all (default: detected)
+      --all                download all six platform/arch combinations, one folder each
+      --install-dir DIR    install directory (default: script folder)
+  -y, --yes                use defaults without interactive prompts
+      --claudex-repo REPO  ClaudeX repository (owner/repo)
+      --claudex-asset NAME asset filename to use from the ClaudeX release
+      --claude-repo REPO   Claude Code repository
+                           (default: anthropics/claude-code)
+      --timeout SECONDS    seconds to wait for ClaudeX to write the config (default: 20)
+  -h, --help               show this help
 
-环境变量:
-  GITHUB_TOKEN / GH_TOKEN  提高 GitHub API 速率限制
-  CLAUDEX_REPO             覆盖 ClaudeX 仓库地址
+Environment variables:
+  GITHUB_TOKEN / GH_TOKEN  raise the GitHub API rate limit
+  CLAUDEX_REPO             override the ClaudeX repository
   HTTPS_PROXY / HTTP_PROXY / NO_PROXY
-                           由 curl 自动使用
-  NO_COLOR                 禁用彩色输出
+                           used automatically by curl
+  NO_COLOR                 disable colored output
 
-平台支持:
-  Linux / macOS  使用系统 POSIX sh 直接运行
-  Windows        使用 Git for Windows 提供的 Git Bash 运行，
-                 例如: bash setup-portable.sh
+Platform support:
+  Linux / macOS  run directly with the system POSIX sh
+  Windows        run with Git Bash from Git for Windows,
+                 for example: bash setup-portable.sh
 
-示例:
+Examples:
   sh setup-portable.sh
   bash setup-portable.sh --update
   bash setup-portable.sh --install-dir /opt/claudex --yes
@@ -263,7 +263,7 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
-# 参数解析与校验
+# Argument parsing and validation
 # ---------------------------------------------------------------------------
 
 validate_repo() {
@@ -272,12 +272,12 @@ validate_repo() {
     case "$repo" in
         */*)
             printf '%s' "$repo" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' || {
-                err "$option 需要 owner/repo 格式，收到：$repo"
+                err "$option expects owner/repo, got: $repo"
                 return 1
             }
             ;;
         *)
-            err "$option 需要 owner/repo 格式，收到：$repo"
+                err "$option expects owner/repo, got: $repo"
             return 1
             ;;
     esac
@@ -308,7 +308,7 @@ parse_args() {
                 ALL_ARCH=1
                 ;;
             --platform)
-                [ "$#" -ge 2 ] || usage_error "--platform 需要一个平台名"
+                [ "$#" -ge 2 ] || usage_error "--platform requires a platform name"
                 PLATFORM_OVERRIDE=$2
                 shift
                 ;;
@@ -316,7 +316,7 @@ parse_args() {
                 PLATFORM_OVERRIDE=${1#*=}
                 ;;
             --arch)
-                [ "$#" -ge 2 ] || usage_error "--arch 需要一个架构名"
+                [ "$#" -ge 2 ] || usage_error "--arch requires an architecture name"
                 ARCH_OVERRIDE=$2
                 shift
                 ;;
@@ -324,7 +324,7 @@ parse_args() {
                 ARCH_OVERRIDE=${1#*=}
                 ;;
             --install-dir)
-                [ "$#" -ge 2 ] || usage_error "--install-dir 需要一个目录"
+                [ "$#" -ge 2 ] || usage_error "--install-dir requires a directory"
                 INSTALL_DIR_OVERRIDE=$2
                 shift
                 ;;
@@ -332,7 +332,7 @@ parse_args() {
                 INSTALL_DIR_OVERRIDE=${1#*=}
                 ;;
             --claudex-repo)
-                [ "$#" -ge 2 ] || usage_error "--claudex-repo 需要一个 owner/repo 参数"
+                [ "$#" -ge 2 ] || usage_error "--claudex-repo requires an owner/repo argument"
                 CLAUDEX_REPO=$2
                 shift
                 ;;
@@ -340,7 +340,7 @@ parse_args() {
                 CLAUDEX_REPO=${1#*=}
                 ;;
             --claudex-asset)
-                [ "$#" -ge 2 ] || usage_error "--claudex-asset 需要一个资产文件名"
+                [ "$#" -ge 2 ] || usage_error "--claudex-asset requires an asset filename"
                 CLAUDEX_ASSET_OVERRIDE=$2
                 shift
                 ;;
@@ -348,7 +348,7 @@ parse_args() {
                 CLAUDEX_ASSET_OVERRIDE=${1#*=}
                 ;;
             --claude-repo)
-                [ "$#" -ge 2 ] || usage_error "--claude-repo 需要一个 owner/repo 参数"
+                [ "$#" -ge 2 ] || usage_error "--claude-repo requires an owner/repo argument"
                 CLAUDE_REPO=$2
                 shift
                 ;;
@@ -356,7 +356,7 @@ parse_args() {
                 CLAUDE_REPO=${1#*=}
                 ;;
             --timeout)
-                [ "$#" -ge 2 ] || usage_error "--timeout 需要一个秒数"
+                [ "$#" -ge 2 ] || usage_error "--timeout requires a number of seconds"
                 LAUNCHER_TIMEOUT=$2
                 shift
                 ;;
@@ -368,7 +368,7 @@ parse_args() {
                 break
                 ;;
             *)
-                usage_error "未知选项：$1"
+                usage_error "unknown option: $1"
                 ;;
         esac
         shift
@@ -376,13 +376,13 @@ parse_args() {
 
     case "$LAUNCHER_TIMEOUT" in
         ''|*[!0-9]*)
-            usage_error "--timeout 必须是正整数"
+            usage_error "--timeout must be a positive integer"
             ;;
     esac
 
     case "$CLAUDEX_ASSET_OVERRIDE" in
         */*|*..*)
-            usage_error "--claudex-asset 不能包含路径分隔符或 .."
+            usage_error "--claudex-asset must not contain a path separator or .."
             ;;
     esac
 
@@ -400,7 +400,7 @@ is_placeholder_repo() {
 }
 
 # ---------------------------------------------------------------------------
-# 平台检测
+# Platform detection
 # ---------------------------------------------------------------------------
 
 detect_platform() {
@@ -416,7 +416,7 @@ detect_platform() {
             OS="linux"
             ;;
         *)
-            die "不支持的操作系统：$sys"
+            die "unsupported operating system: $sys"
             ;;
     esac
 
@@ -434,11 +434,11 @@ detect_platform() {
             ARCH="arm64"
             ;;
         *)
-            die "不支持的 CPU 架构：$raw_arch"
+            die "unsupported CPU architecture: $raw_arch"
             ;;
     esac
 
-    # Apple Silicon 上通过 Rosetta 运行 x86_64 shell 时，仍然下载原生 arm64 版本。
+    # When an x86_64 shell runs under Rosetta on Apple Silicon, still download the native arm64 build.
     if [ "$OS" = "macos" ] && [ "$ARCH" = "x64" ]; then
         if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || printf '0')" = "1" ]; then
             ARCH="arm64"
@@ -506,22 +506,22 @@ prompt_platform_arch() {
     [ -z "$ARCH_OVERRIDE" ] || ARCH=$ARCH_OVERRIDE
 
     if [ "$INTERACTIVE" -eq 1 ]; then
-        printf '安装平台 [%s] (windows/macos/linux/all): ' "$OS"
+        printf 'Install platform [%s] (windows/macos/linux/all): ' "$OS"
         read answer || answer=""
         case "$answer" in
             "") ;;
             windows|macos|linux|all) OS=$answer ;;
-            *) warn "无效平台：$answer，使用 $OS" ;;
+            *) warn "invalid platform: $answer; using $OS" ;;
         esac
 
         default_arch=$ARCH
         [ "$OS" = "all" ] && default_arch=all
-        printf 'CPU 架构 [%s] (x64/arm64/all): ' "$default_arch"
+        printf 'CPU architecture [%s] (x64/arm64/all): ' "$default_arch"
         read answer || answer=""
         case "$answer" in
             "") ARCH=$default_arch ;;
             x64|arm64|all) ARCH=$answer ;;
-            *) warn "无效架构：$answer，使用 $default_arch" ;;
+            *) warn "invalid architecture: $answer; using $default_arch" ;;
         esac
     elif [ -z "$ARCH_OVERRIDE" ] && [ "$OS" = "all" ]; then
         # Platform "all" without an explicit arch keeps the six-target default.
@@ -531,12 +531,12 @@ prompt_platform_arch() {
     case "$OS" in
         windows|macos|linux) ;;
         all) ALL_TARGETS=1 ;;
-        *) die "不支持的平台：$OS" ;;
+        *) die "unsupported platform: $OS" ;;
     esac
     case "$ARCH" in
         x64|arm64) ;;
         all) ALL_ARCH=1 ;;
-        *) die "不支持的架构：$ARCH" ;;
+        *) die "unsupported architecture: $ARCH" ;;
     esac
 
     platform_count=1
@@ -545,9 +545,9 @@ prompt_platform_arch() {
     [ "$ALL_ARCH" -eq 1 ] && arch_count=2
     total_count=$((platform_count * arch_count))
     if [ "$total_count" -gt 1 ]; then
-        info "将下载 $total_count 个平台/架构组合，每项一个子目录。"
+        info "Downloading $total_count platform/architecture combinations, one folder each."
     elif [ "$OS" != "$DETECTED_OS" ] || [ "$ARCH" != "$DETECTED_ARCH" ]; then
-        info "将下载 $OS/$ARCH 版本（不会在本机运行）。"
+        info "Downloading the $OS/$ARCH build (it cannot run on this host)."
     fi
 }
 
@@ -555,7 +555,7 @@ prompt_install_dir() {
     if [ -n "$INSTALL_DIR_OVERRIDE" ]; then
         ROOT=$INSTALL_DIR_OVERRIDE
     elif [ "$INTERACTIVE" -eq 1 ]; then
-        printf '安装目录 [%s]: ' "$ROOT"
+        printf 'Install directory [%s]: ' "$ROOT"
         read answer || answer=""
         [ -z "$answer" ] || ROOT=$answer
     fi
@@ -571,16 +571,16 @@ prompt_install_dir() {
 
     if [ ! -d "$ROOT" ]; then
         if [ "$INTERACTIVE" -eq 1 ]; then
-            printf '目录不存在：%s\n是否创建？[Y/n]: ' "$ROOT"
+            printf 'Directory does not exist: %s\nCreate it? [Y/n]: ' "$ROOT"
             read answer || answer=""
             case "$answer" in
-                n|N|no|NO) die "已取消。" ;;
+                n|N|no|NO) die "Cancelled." ;;
             esac
         fi
-        mkdir -p "$ROOT" || die "无法创建目录：$ROOT"
-        ok "已创建目录：$ROOT"
+        mkdir -p "$ROOT" || die "cannot create directory: $ROOT"
+        ok "Created directory: $ROOT"
     fi
-    [ -w "$ROOT" ] || die "目录不可写：$ROOT"
+    [ -w "$ROOT" ] || die "directory is not writable: $ROOT"
 }
 
 select_claude_asset_name() {
@@ -610,29 +610,29 @@ select_claude_asset_name() {
             CLAUDE_ASSET="claude-linux-arm64.tar.gz"
             ;;
         *)
-            die "没有适用于 $OS/$ARCH/$LIBC 的 Claude Code 安装包"
+            die "no Claude Code package for $OS/$ARCH/$LIBC"
             ;;
     esac
 }
 
 # ---------------------------------------------------------------------------
-# 依赖与临时目录
+# Dependencies and temporary directory
 # ---------------------------------------------------------------------------
 
 check_dependencies() {
-    command -v curl >/dev/null 2>&1 || die "缺少 curl。Windows 请使用 Git Bash，或安装 curl。"
-    command -v tar >/dev/null 2>&1 || die "缺少 tar。"
-    command -v perl >/dev/null 2>&1 || die "缺少 perl。"
-    perl -MJSON::PP -e '1' >/dev/null 2>&1 || die "缺少 Perl 模块 JSON::PP。"
-    command -v find >/dev/null 2>&1 || die "缺少 find。"
-    command -v awk >/dev/null 2>&1 || die "缺少 awk。"
-    command -v sed >/dev/null 2>&1 || die "缺少 sed。"
-    command -v grep >/dev/null 2>&1 || die "缺少 grep。"
-    command -v mkdir >/dev/null 2>&1 || die "缺少 mkdir。"
-    command -v cp >/dev/null 2>&1 || die "缺少 cp。"
-    command -v mv >/dev/null 2>&1 || die "缺少 mv。"
-    command -v chmod >/dev/null 2>&1 || die "缺少 chmod。"
-    command -v date >/dev/null 2>&1 || die "缺少 date。"
+    command -v curl >/dev/null 2>&1 || die "missing curl. On Windows use Git Bash, or install curl."
+    command -v tar >/dev/null 2>&1 || die "missing tar."
+    command -v perl >/dev/null 2>&1 || die "missing perl."
+    perl -MJSON::PP -e '1' >/dev/null 2>&1 || die "missing Perl module JSON::PP."
+    command -v find >/dev/null 2>&1 || die "missing find."
+    command -v awk >/dev/null 2>&1 || die "missing awk."
+    command -v sed >/dev/null 2>&1 || die "missing sed."
+    command -v grep >/dev/null 2>&1 || die "missing grep."
+    command -v mkdir >/dev/null 2>&1 || die "missing mkdir."
+    command -v cp >/dev/null 2>&1 || die "missing cp."
+    command -v mv >/dev/null 2>&1 || die "missing mv."
+    command -v chmod >/dev/null 2>&1 || die "missing chmod."
+    command -v date >/dev/null 2>&1 || die "missing date."
 
     CURL=$(command -v curl)
 
@@ -642,7 +642,7 @@ check_dependencies() {
         SHA256_CMD="shasum"
     else
         SHA256_CMD=""
-        warn "未找到 sha256sum/shasum，将跳过 SHA-256 校验。"
+        warn "sha256sum/shasum not found; skipping SHA-256 verification."
     fi
 }
 
@@ -652,12 +652,12 @@ setup_work() {
     fi
     if [ -z "$WORK" ]; then
         WORK="${TMPDIR:-/tmp}/claudex-setup.$$"
-        (umask 077 && mkdir -p "$WORK") || die "无法创建临时目录：$WORK"
+        (umask 077 && mkdir -p "$WORK") || die "cannot create temporary directory: $WORK"
     fi
 }
 
 # ---------------------------------------------------------------------------
-# 下载与 GitHub API
+# Downloads and GitHub API
 # ---------------------------------------------------------------------------
 
 download_plain() {
@@ -702,7 +702,7 @@ download_plain() {
             rm -f "$dl_dest"
         fi
         if [ "$dl_attempt" -lt "$dl_max_attempts" ]; then
-            warn "$dl_label 下载中断（尝试 $dl_attempt/$dl_max_attempts），2 秒后继续…"
+            warn "$dl_label download interrupted (attempt $dl_attempt/$dl_max_attempts); resuming in 2 seconds..."
             sleep 2
         fi
         dl_attempt=$((dl_attempt + 1))
@@ -710,7 +710,7 @@ download_plain() {
 
     rm -f "$dl_dest"
     dl_detail=$(tail -n 1 "$dl_err_file" 2>/dev/null | tr -d '\r')
-    warn "$dl_label 下载失败${dl_detail:+：$dl_detail}"
+    warn "$dl_label download failed${dl_detail:+: $dl_detail}"
     return 1
 }
 
@@ -722,14 +722,14 @@ download_release_asset() {
         if download_plain "$ASSET_BROWSER_URL" "$dl_dest" "$dl_label" 0; then
             return 0
         fi
-        warn "$dl_label: 直链下载失败，改用 GitHub API 重试。"
+        warn "$dl_label: direct download failed; retrying through the GitHub API."
     fi
     if [ -n "$ASSET_API_URL" ]; then
         if download_plain "$ASSET_API_URL" "$dl_dest" "$dl_label" 1; then
             return 0
         fi
     fi
-    warn "$dl_label: 下载失败。"
+    warn "$dl_label: download failed."
     return 1
 }
 
@@ -756,30 +756,30 @@ fetch_latest_release() {
             ;;
         403|429)
             detail=$(head -n 1 "$out" 2>/dev/null | cut -c1-240 | tr -d '\r')
-            warn "GitHub API 速率受限（设置 GITHUB_TOKEN 可提高上限）：$detail"
+            warn "GitHub API rate limit reached (set GITHUB_TOKEN for a higher limit): $detail"
             return 1
             ;;
         404)
-            warn "GitHub 仓库不存在或没有 release：$repo"
+            warn "GitHub repository not found or has no releases: $repo"
             return 1
             ;;
         000)
             detail=$(tail -n 1 "$err_file" 2>/dev/null | tr -d '\r')
-            warn "无法连接 GitHub API${detail:+：$detail}"
+            warn "cannot reach the GitHub API${detail:+: $detail}"
             return 1
             ;;
         *)
             detail=$(head -n 1 "$out" 2>/dev/null | cut -c1-240 | tr -d '\r')
-            warn "GitHub API 返回 HTTP $status${detail:+：$detail}"
+            warn "GitHub API returned HTTP $status${detail:+: $detail}"
             return 1
             ;;
     esac
 }
 
-# 从 release JSON 中选择当前平台/架构的资产。
-# 输出两行（TAB 分隔）:
-#   TAG<TAB>标签
-#   ASSET<TAB>文件名<TAB>browser_url<TAB>api_url
+# Select the asset for the current platform/architecture from the release JSON.
+# Prints two lines (TAB-separated):
+#   TAG<TAB>tag
+#   ASSET<TAB>filename<TAB>browser_url<TAB>api_url
 select_asset_from_release() {
     json_file=$1
     expected=$2
@@ -792,7 +792,7 @@ select_asset_from_release() {
         my ($file, $expected, $os, $arch, $libc) = @ARGV;
         local $/;
         open my $fh, "<:raw", $file or do {
-            print "ERROR\t无法读取 release JSON\n";
+            print "ERROR\tcannot read release JSON\n";
             exit 1;
         };
         my $raw = <$fh>;
@@ -801,14 +801,14 @@ select_asset_from_release() {
 
         my $rel = eval { JSON::PP->new->utf8->decode($raw) };
         if (!$rel || ref($rel) ne "HASH" || !$rel->{tag_name}) {
-            print "ERROR\trelease JSON 缺少 tag_name\n";
+            print "ERROR\trelease JSON has no tag_name\n";
             exit 1;
         }
 
         my $tag = $rel->{tag_name};
         my @assets = @{ $rel->{assets} || [] };
 
-        # 优先精确匹配预期资产名（Claude Code 的资产名是固定的）。
+        # Prefer an exact match on the expected asset name (Claude Code asset names are fixed).
         if ($expected ne "") {
             for my $a (@assets) {
                 my $name = $a->{name} // "";
@@ -827,7 +827,7 @@ select_asset_from_release() {
             next if $name eq "";
             my $l = lc($name);
 
-            # 校验文件、签名、安装器、源码包不参与自动选择。
+            # Checksums, signatures, installers, and source archives are not auto-selected.
             next if $l =~ /(?:sha256|sha512|shasums|checksums?|\.sig$|\.asc$|\.txt$|\.json$|\.sbom$|\.dmg$|\.pkg$|\.msi$|\.deb$|\.rpm$)/;
             next if $l =~ /(?:^|[._-])(?:source|src|setup|installer|install|debug|symbols)(?:[._-]|$)/;
 
@@ -880,7 +880,7 @@ select_asset_from_release() {
         }
 
         if (!@candidates) {
-            print "ERROR\t没有匹配 $os/$arch/$libc 的 release 资产\n";
+            print "ERROR\tno release asset matches $os/$arch/$libc\n";
             exit 3;
         }
 
@@ -900,7 +900,7 @@ select_asset_from_release() {
             warn "$(grep '^ERROR' "$out" | head -n 1 | cut -f2)"
         else
             detail=$(tail -n 1 "$WORK/asset.err" 2>/dev/null | tr -d '\r')
-            warn "解析 release 资产失败${detail:+：$detail}"
+            warn "cannot parse release assets${detail:+: $detail}"
         fi
         return 1
     fi
@@ -919,7 +919,7 @@ parse_selection() {
     fi
     case "$ASSET_NAME" in
         */*|*..*)
-            warn "release 返回了非法的资产名：$ASSET_NAME"
+            warn "release returned an invalid asset name: $ASSET_NAME"
             return 1
             ;;
     esac
@@ -927,7 +927,7 @@ parse_selection() {
 }
 
 # ---------------------------------------------------------------------------
-# SHA-256 校验
+# SHA-256 verification
 # ---------------------------------------------------------------------------
 
 sha256_of() {
@@ -974,45 +974,45 @@ verify_download() {
     repo=$5
 
     if [ ! -s "$file" ]; then
-        err "$label: 下载文件缺失或为空，安装已中止。"
+        err "$label: downloaded file is missing or empty; installation aborted."
         return 1
     fi
 
     if [ -z "$SHA256_CMD" ]; then
-        warn "$label: 没有可用的 SHA-256 工具，跳过校验。"
+        warn "$label: no SHA-256 tool available; skipping verification."
         return 0
     fi
 
     shasums="$WORK/SHASUMS256.txt"
     if ! fetch_shasums "$repo" "$ref" "$shasums"; then
-        warn "$label: 无法获取 SHASUMS256.txt，跳过校验。"
+        warn "$label: cannot fetch SHASUMS256.txt; skipping verification."
         return 0
     fi
 
     expected=$(awk -v n="$asset" '$2 == n || $2 == ("*" n) { print $1; exit }' "$shasums")
     if [ -z "$expected" ]; then
-        warn "$label: SHASUMS256.txt 中没有 $asset，跳过校验。"
+        warn "$label: SHASUMS256.txt does not list $asset; skipping verification."
         return 0
     fi
 
     actual=$(sha256_of "$file") || {
-        warn "$label: 无法计算 SHA-256，跳过校验。"
+        warn "$label: cannot compute SHA-256; skipping verification."
         return 0
     }
 
     if [ "$actual" != "$expected" ]; then
-        err "$label: SHA-256 校验失败"
-        err "  期望: $expected"
-        err "  实际: $actual"
+        err "$label: SHA-256 verification failed"
+        err "  expected: $expected"
+        err "  actual:   $actual"
         return 1
     fi
 
-    ok "$label: SHA-256 校验通过"
+    ok "$label: SHA-256 verified"
     return 0
 }
 
 # ---------------------------------------------------------------------------
-# 解压与文件查找
+# Extraction and file lookup
 # ---------------------------------------------------------------------------
 
 archive_list_safe() {
@@ -1034,21 +1034,21 @@ extract_tar() {
     list="$WORK/tar-list.txt"
 
     tar -tf "$archive" >"$list" 2>"$WORK/tar.err" || {
-        warn "无法读取 tar 包：$(tail -n 1 "$WORK/tar.err" 2>/dev/null | tr -d '\r')"
+        warn "cannot read the tar archive: $(tail -n 1 "$WORK/tar.err" 2>/dev/null | tr -d '\r')"
         return 1
     }
     if ! archive_list_safe "$list"; then
-        warn "压缩包包含不安全的路径，已拒绝解压。"
+        warn "the archive contains unsafe paths; extraction refused."
         return 1
     fi
-    # 拒绝符号链接和硬链接，避免解压时跳出临时目录。
+    # Reject symbolic and hard links so extraction cannot escape the temporary directory.
     if tar -tvf "$archive" 2>/dev/null | awk 'substr($1, 1, 1) == "l" || substr($1, 1, 1) == "h" { bad = 1 } END { exit (bad ? 0 : 1) }'; then
-        warn "压缩包包含符号链接或硬链接，已拒绝解压。"
+        warn "the archive contains symbolic or hard links; extraction refused."
         return 1
     fi
 
     tar -xf "$archive" -C "$outdir" || {
-        warn "tar 解压失败。"
+        warn "tar extraction failed."
         return 1
     }
     return 0
@@ -1063,35 +1063,35 @@ extract_zip() {
         unzip -Z1 "$archive" >"$list" 2>/dev/null
         rc=$?
         if [ "$rc" -gt 1 ]; then
-            warn "无法读取 zip 包。"
+            warn "cannot read the zip archive."
             return 1
         fi
         if ! archive_list_safe "$list"; then
-            warn "压缩包包含不安全的路径，已拒绝解压。"
+            warn "the archive contains unsafe paths; extraction refused."
             return 1
         fi
         unzip -q "$archive" -d "$outdir"
         rc=$?
-        # Info-ZIP 返回 1 表示“完成但有警告”（例如 Windows 生成的
-        # 反斜杠路径），此时文件通常已经正确解压；2 以上才是错误。
+        # Info-ZIP returns 1 for "completed with warnings" (for example,
+        # backslash paths created on Windows); files are usually extracted correctly. Values above 1 are errors.
         if [ "$rc" -gt 1 ]; then
-            warn "zip 解压失败（unzip 返回 $rc）。"
+            warn "zip extraction failed (unzip returned $rc)."
             return 1
         fi
         if [ "$rc" -eq 1 ]; then
-            warn "zip 解压完成，但 unzip 报告了警告（已继续）。"
+            warn "zip extraction completed with warnings from unzip (continuing)."
         fi
         return 0
     fi
 
-    # bsdtar 也能读取 zip（Windows 自带的 tar.exe、部分 macOS 环境）。
+    # bsdtar can also read zip archives (Windows' bundled tar.exe, some macOS setups).
     if tar -tf "$archive" >"$list" 2>/dev/null; then
         if ! archive_list_safe "$list"; then
-            warn "压缩包包含不安全的路径，已拒绝解压。"
+            warn "the archive contains unsafe paths; extraction refused."
             return 1
         fi
         tar -xf "$archive" -C "$outdir" || {
-            warn "zip 解压失败。"
+            warn "zip extraction failed."
             return 1
         }
         return 0
@@ -1101,13 +1101,13 @@ extract_zip() {
         ARCHIVE_PATH=$archive EXTRACT_PATH=$outdir powershell -NoProfile -ExecutionPolicy Bypass \
             -Command 'Expand-Archive -LiteralPath $env:ARCHIVE_PATH -DestinationPath $env:EXTRACT_PATH -Force' \
             >/dev/null 2>&1 || {
-            warn "PowerShell 解压失败。"
+            warn "PowerShell extraction failed."
             return 1
         }
         return 0
     fi
 
-    warn "缺少 unzip，无法解压 zip 包。"
+    warn "unzip is missing; cannot extract the zip archive."
     return 1
 }
 
@@ -1127,9 +1127,9 @@ extract_archive() {
             extract_tar "$archive" "$outdir"
             ;;
         *)
-            # 裸二进制（例如直接发布的 ClaudeX.exe / claudex-linux-x64）。
+            # Raw binary (for example ClaudeX.exe / claudex-linux-x64 published directly).
             cp -f "$archive" "$outdir/$(basename "$name")" || {
-                warn "无法复制裸二进制文件。"
+                warn "cannot copy the raw binary."
                 return 1
             }
             chmod 755 "$outdir/$(basename "$name")" 2>/dev/null || true
@@ -1152,8 +1152,8 @@ find_component_binary() {
             mv -f "$list.filtered" "$list"
         fi
         if [ ! -s "$list" ]; then
-            # 文件名不含 claudex 时，只有在压缩包里仅剩一个可执行候选时才采用，
-            # 避免误把 README、DLL、脚本之类的东西当成启动器。
+            # When the filename does not contain claudex, only use a single remaining
+            # executable candidate to avoid treating README, DLLs, or scripts as the launcher.
             find "$dir" -type f -print >"$list.all" 2>/dev/null
             grep -viE '\.(json|md|txt|log|ini|cfg|conf|dll|so|dylib|pdb|xml|yml|yaml|html|css|js|png|jpg|jpeg|ico|gif|svg)$' "$list.all" >"$list.filtered" || true
             grep -viE '(^|/)(license|licence|readme|changelog|copying)(\.|$)' "$list.filtered" >"$list" || true
@@ -1223,7 +1223,7 @@ marker_value() {
 }
 
 # ---------------------------------------------------------------------------
-# 组件安装
+# Component installation
 # ---------------------------------------------------------------------------
 
 install_component_from_release() {
@@ -1240,9 +1240,9 @@ install_component_from_release() {
     rm -rf "$extract_dir"
     mkdir -p "$extract_dir" || return 1
 
-    info "下载 $label $RELEASE_TAG（$ASSET_NAME）"
+    info "Downloading $label $RELEASE_TAG ($ASSET_NAME)"
     download_release_asset "$label" || {
-        err "$label: 下载失败，安装已中止。"
+        err "$label: download failed; installation aborted."
         return 1
     }
 
@@ -1251,11 +1251,11 @@ install_component_from_release() {
     extract_archive "$archive" "$extract_dir" "$ASSET_NAME" || return 1
 
     bin=$(find_component_binary "$extract_dir" "$kind") || {
-        warn "$label: 压缩包中找不到可执行文件。"
+        warn "$label: no executable found in the archive."
         return 1
     }
     install_binary "$bin" "$install_dest" || {
-        warn "$label: 安装到 $install_dest 失败。"
+        warn "$label: failed to install to $install_dest"
         return 1
     }
 
@@ -1270,20 +1270,20 @@ install_component_from_release() {
             "tag=$RELEASE_TAG" \
             "asset=$ASSET_NAME" \
             "sha256=$sha" \
-            "exe=$(basename "$dest")" || warn "$label: 无法写入版本标记。"
+            "exe=$(basename "$dest")" || warn "$label: cannot write the version marker."
     else
         write_marker "$marker" \
             "repo=$repo" \
             "tag=$RELEASE_TAG" \
             "asset=$ASSET_NAME" \
-            "sha256=$sha" || warn "$label: 无法写入版本标记。"
+            "sha256=$sha" || warn "$label: cannot write the version marker."
     fi
 
-    ok "$label 已安装：$install_dest"
+    ok "$label installed: $install_dest"
     return 0
 }
 
-# 尝试从 /releases/latest/download/... 的重定向链里解析真实 tag。
+# Resolve the real tag from the /releases/latest/download/... redirect chain.
 resolve_latest_tag() {
     url=$1
     headers="$WORK/latest-headers.txt"
@@ -1323,28 +1323,28 @@ ensure_claude() {
     if fetch_latest_release "$CLAUDE_REPO" "$release_json"; then
         if ! select_asset_from_release "$release_json" "$CLAUDE_ASSET" "$selection"; then
             if [ "$have" -eq 1 ]; then
-                warn "无法在最新 release 中匹配 Claude Code 安装包，保留现有版本。"
+                warn "no Claude Code package in the latest release; keeping the existing version."
                 return 0
             fi
             HARD_FAIL=1
-            err "无法在最新 release 中匹配 Claude Code 安装包。"
+            err "no Claude Code package found in the latest release."
             return 1
         fi
 
         parse_selection "$selection" || {
             if [ "$have" -eq 1 ]; then
-                warn "无法解析 Claude Code release，保留现有版本。"
+                warn "cannot parse the Claude Code release; keeping the existing version."
                 return 0
             fi
             HARD_FAIL=1
-            err "无法解析 Claude Code release。"
+            err "cannot parse the Claude Code release."
             return 1
         }
 
         if [ "$have" -eq 1 ] && [ "$FORCE_UPDATE" -eq 0 ] &&
             [ -n "$marker_tag" ] && [ "$marker_repo" = "$CLAUDE_REPO" ] &&
             [ "$marker_tag" = "$RELEASE_TAG" ] && [ "$marker_asset" = "$ASSET_NAME" ]; then
-            ok "Claude Code 已是最新（$RELEASE_TAG）"
+            ok "Claude Code is up to date ($RELEASE_TAG)"
             return 0
         fi
 
@@ -1352,7 +1352,7 @@ ensure_claude() {
             if install_component_from_release "Claude Code" "claude" "$CLAUDE_BIN" "$CLAUDE_MARKER" "$CLAUDE_REPO"; then
                 return 0
             fi
-            warn "Claude Code 更新失败，保留现有版本。"
+            warn "Claude Code update failed; keeping the existing version."
             return 0
         fi
 
@@ -1360,17 +1360,17 @@ ensure_claude() {
             return 0
         fi
         HARD_FAIL=1
-        err "Claude Code 下载/安装失败。"
+        err "Claude Code download/installation failed."
         return 1
     fi
 
     if [ "$have" -eq 1 ] && [ "$FORCE_UPDATE" -eq 0 ]; then
-        warn "无法检查 Claude Code 更新（网络或 GitHub API 错误），继续使用现有版本。"
+        warn "cannot check for Claude Code updates (network or GitHub API error); using the existing version."
         return 0
     fi
 
-    # API 不可用时，尝试 GitHub 的 latest 直链（首次安装或 --update 时）。
-    warn "无法获取 Claude Code release 信息，尝试 latest 直链下载。"
+    # When the API is unavailable, try GitHub's latest direct URL (first install or --update).
+    warn "cannot fetch Claude Code release info; trying the latest direct download."
     RELEASE_TAG="latest"
     VERIFY_REF="latest"
     ASSET_NAME="$CLAUDE_ASSET"
@@ -1391,12 +1391,12 @@ ensure_claude() {
     fi
 
     if [ "$have" -eq 1 ]; then
-        warn "Claude Code 更新失败，保留现有版本。"
+        warn "Claude Code update failed; keeping the existing version."
         return 0
     fi
 
     HARD_FAIL=1
-    err "Claude Code 下载失败，且本地没有可用的现有版本。"
+        err "Claude Code download failed and no existing version is available."
     return 1
 }
 
@@ -1444,11 +1444,11 @@ ensure_claudex() {
 
     if is_placeholder_repo "$CLAUDEX_REPO"; then
         if [ -n "$existing" ]; then
-            info "ClaudeX 仓库地址仍是占位符，保留现有启动器：$existing"
+            info "ClaudeX repository is still a placeholder; keeping the existing launcher: $existing"
         else
             CLAUDEX_MISSING_PLACEHOLDER=1
-            warn "ClaudeX 仓库地址仍是占位符：$CLAUDEX_REPO"
-            warn "项目发布后，请用 --claudex-repo owner/repo 或环境变量 CLAUDEX_REPO 指定；本次跳过启动器下载。"
+            warn "ClaudeX repository is still a placeholder: $CLAUDEX_REPO"
+            warn "After publishing, pass --claudex-repo owner/repo or set CLAUDEX_REPO; skipping the launcher download for now."
         fi
         return 0
     fi
@@ -1459,15 +1459,15 @@ ensure_claudex() {
     if [ -n "$existing" ]; then
         if fetch_latest_release "$CLAUDEX_REPO" "$release_json"; then
             if ! select_asset_from_release "$release_json" "$CLAUDEX_ASSET_OVERRIDE" "$selection"; then
-                warn "无法在最新 release 中匹配 ClaudeX 安装包，保留现有启动器。"
+                warn "no ClaudeX package in the latest release; keeping the existing launcher."
                 return 0
             fi
             if ! parse_selection "$selection"; then
-                warn "无法解析 ClaudeX release，保留现有启动器。"
+                warn "cannot parse the ClaudeX release; keeping the existing launcher."
                 return 0
             fi
             if [ -n "$CLAUDEX_ASSET_OVERRIDE" ] && [ "$ASSET_NAME" != "$CLAUDEX_ASSET_OVERRIDE" ]; then
-                warn "release 中没有资产 $CLAUDEX_ASSET_OVERRIDE，保留现有启动器。"
+                warn "release has no asset $CLAUDEX_ASSET_OVERRIDE; keeping the existing launcher."
                 return 0
             fi
 
@@ -1475,41 +1475,41 @@ ensure_claudex() {
                 [ "$marker_repo" = "$CLAUDEX_REPO" ] &&
                 [ "$marker_tag" = "$RELEASE_TAG" ] &&
                 [ "$marker_asset" = "$ASSET_NAME" ]; then
-                ok "ClaudeX 已是最新（$RELEASE_TAG）"
+                ok "ClaudeX is up to date ($RELEASE_TAG)"
                 return 0
             fi
 
             if [ -z "$marker_tag" ] && [ "$FORCE_UPDATE" -eq 0 ]; then
-                warn "检测到未由本脚本管理的 ClaudeX：$existing"
-                warn "最新版是 $RELEASE_TAG；为避免覆盖本地构建，保留现有文件。需要更新时运行：$0 --update"
+                warn "found a ClaudeX not managed by this script: $existing"
+                warn "latest is $RELEASE_TAG; keeping the existing file to avoid overwriting a local build. Run $0 --update to update."
                 return 0
             fi
 
             if install_component_from_release "ClaudeX" "claudex" "$CLAUDEX_BIN" "$CLAUDEX_MARKER" "$CLAUDEX_REPO"; then
                 return 0
             fi
-            warn "ClaudeX 更新失败，保留现有启动器。"
+            warn "ClaudeX update failed; keeping the existing launcher."
             return 0
         fi
 
-        warn "无法检查 ClaudeX 更新（网络或 GitHub API 错误），继续使用现有启动器。"
+        warn "cannot check for ClaudeX updates (network or GitHub API error); using the existing launcher."
         return 0
     fi
 
     if fetch_latest_release "$CLAUDEX_REPO" "$release_json"; then
         if ! select_asset_from_release "$release_json" "$CLAUDEX_ASSET_OVERRIDE" "$selection"; then
             HARD_FAIL=1
-            err "无法在最新 release 中匹配 ClaudeX 安装包。"
+            err "no ClaudeX package found in the latest release."
             return 1
         fi
         if ! parse_selection "$selection"; then
             HARD_FAIL=1
-            err "无法解析 ClaudeX release。"
+            err "cannot parse the ClaudeX release."
             return 1
         fi
         if [ -n "$CLAUDEX_ASSET_OVERRIDE" ] && [ "$ASSET_NAME" != "$CLAUDEX_ASSET_OVERRIDE" ]; then
             HARD_FAIL=1
-            err "release 中没有资产 $CLAUDEX_ASSET_OVERRIDE。"
+            err "release has no asset $CLAUDEX_ASSET_OVERRIDE."
             return 1
         fi
 
@@ -1517,12 +1517,12 @@ ensure_claudex() {
             return 0
         fi
         HARD_FAIL=1
-        err "ClaudeX 下载/安装失败。"
+        err "ClaudeX download/installation failed."
         return 1
     fi
 
     HARD_FAIL=1
-    err "无法获取 ClaudeX release 信息，且本地没有启动器。"
+    err "cannot fetch ClaudeX release info and no local launcher exists."
     return 1
 }
 
@@ -1598,13 +1598,13 @@ run_launcher_once() {
     if [ -f "$CONFIG_FILE" ] && ! config_is_valid; then
         backup="$CONFIG_FILE.invalid.$(date +%Y%m%d-%H%M%S)"
         if mv -f "$CONFIG_FILE" "$backup" 2>/dev/null; then
-            warn "现有配置无法解析，已备份到 $backup"
+            warn "existing config cannot be parsed; backed up to $backup"
         else
             rm -f "$CONFIG_FILE" 2>/dev/null || true
         fi
     fi
 
-    info "正在运行 ClaudeX 以生成/修复配置文件（完成后会自动关闭）..."
+    info "Running ClaudeX to generate/repair the configuration file (it will close automatically)..."
     log="$WORK/launcher.log"
 
     "$LAUNCHER" --config "$CONFIG_FILE" </dev/null >"$log" 2>&1 &
@@ -1622,7 +1622,7 @@ run_launcher_once() {
         waited=$((waited + 1))
     done
 
-    # 给刚写完的配置文件一点落盘时间。
+    # Give the just-written config file a moment to reach disk.
     if ! config_is_valid; then
         sleep 1
     fi
@@ -1631,13 +1631,13 @@ run_launcher_once() {
     LAUNCHER_PID=""
 
     if config_is_valid; then
-        ok "已生成 $CONFIG_NAME"
+        ok "generated $CONFIG_NAME"
         return 0
     fi
 
-    warn "ClaudeX 没有生成有效的配置文件。"
+    warn "ClaudeX did not generate a valid configuration file."
     if [ -s "$log" ]; then
-        say "--- ClaudeX 输出（最后 5 行）---" >&2
+        say "--- ClaudeX output (last 5 lines) ---" >&2
         tail -n 5 "$log" 2>/dev/null | perl -pe 's/\e\[[0-9;?]*[A-Za-z]//g; s/\r//g; s/\x00//g' >&2 || true
         say "-----------------------------" >&2
     fi
@@ -1647,7 +1647,7 @@ run_launcher_once() {
 apply_config() {
     if [ -f "$CONFIG_FILE" ]; then
         cp -p "$CONFIG_FILE" "$CONFIG_FILE.before-setup" 2>/dev/null ||
-            warn "无法备份配置到 $CONFIG_FILE.before-setup"
+            warn "cannot back up the config to $CONFIG_FILE.before-setup"
     fi
 
     perl -MJSON::PP -e '
@@ -1656,13 +1656,13 @@ apply_config() {
 
         my ($path, $claude_path) = @ARGV;
         local $/;
-        open my $fh, "<:raw", $path or die "无法读取配置：$!\n";
+        open my $fh, "<:raw", $path or die "cannot read config: $!\n";
         my $raw = <$fh>;
         close $fh;
         $raw =~ s/^\xEF\xBB\xBF//;
 
         my $doc = eval { JSON::PP->new->utf8->decode($raw) };
-        die "配置文件不是有效的 JSON 对象\n" unless $doc && ref($doc) eq "HASH";
+        die "config is not a valid JSON object\n" unless $doc && ref($doc) eq "HASH";
 
         $doc->{claudeConfigDir} = "data";
         $doc->{claudePath} = [ $claude_path ];
@@ -1677,10 +1677,10 @@ apply_config() {
         $out .= "\n" unless $out =~ /\n\z/;
 
         my $tmp = $path . ".tmp.$$";
-        open my $ofh, ">:raw", $tmp or die "无法写入配置：$!\n";
+        open my $ofh, ">:raw", $tmp or die "cannot write config: $!\n";
         print $ofh $out;
-        close $ofh or die "无法写入配置：$!\n";
-        rename $tmp, $path or die "无法替换配置：$!\n";
+        close $ofh or die "cannot write config: $!\n";
+        rename $tmp, $path or die "cannot replace config: $!\n";
     ' "$CONFIG_FILE" "$CLAUDE_PATH_CONFIG" || return 1
 
     return 0
@@ -1709,7 +1709,7 @@ verify_config_values() {
 }
 
 # ---------------------------------------------------------------------------
-# 展示
+# Display
 # ---------------------------------------------------------------------------
 
 display_path() {
@@ -1723,9 +1723,9 @@ display_path() {
 print_banner() {
     libc_suffix=""
     [ "$LIBC" = "musl" ] && libc_suffix=" (musl)"
-    say "${BOLD}便携版 Claude Code 一键部署${RESET}"
-    say "  脚本目录: $(display_path "$ROOT")"
-    say "  检测到:   $PLATFORM_LABEL $ARCH$libc_suffix"
+    say "${BOLD}ClaudeX + Claude Code portable setup${RESET}"
+    say "  Script directory: $(display_path "$ROOT")"
+    say "  Detected:         $PLATFORM_LABEL $ARCH$libc_suffix"
     say ""
 }
 
@@ -1734,54 +1734,54 @@ print_summary() {
     [ "$LIBC" = "musl" ] && libc_suffix=" (musl)"
 
     say ""
-    say "${BOLD}================ 完成 ================${RESET}"
-    say "  平台:        $PLATFORM_LABEL $ARCH$libc_suffix"
-    say "  脚本目录:    $(display_path "$ROOT")"
+    say "${BOLD}================ Done ================${RESET}"
+    say "  Platform:     $PLATFORM_LABEL $ARCH$libc_suffix"
+    say "  Script dir:   $(display_path "$ROOT")"
 
     if [ -n "$LAUNCHER" ] && [ -f "$LAUNCHER" ]; then
         say "  ClaudeX:     $(display_path "$LAUNCHER")"
     else
-        say "  ClaudeX:     未安装"
+        say "  ClaudeX:      not installed"
     fi
 
     if [ -f "$CLAUDE_BIN" ]; then
         say "  Claude Code: $(display_path "$CLAUDE_BIN")"
     else
-        say "  Claude Code: 未安装"
+        say "  Claude Code:  not installed"
     fi
 
-    say "  配置文件:    $(display_path "$CONFIG_FILE")"
+    say "  Config file:  $(display_path "$CONFIG_FILE")"
     say "    claudeConfigDir = data"
     say "    claudePath      = $CLAUDE_PATH_CONFIG"
 
     if [ -n "$LAUNCHER" ] && [ -f "$LAUNCHER" ]; then
         if [ "$OS" = "$DETECTED_OS" ] && [ "$ARCH" = "$DETECTED_ARCH" ]; then
             say ""
-            say "启动方式：$(display_path "$LAUNCHER")"
+            say "Launch: $(display_path "$LAUNCHER")"
         else
             say ""
-            say "这是 $PLATFORM_LABEL $ARCH 版本，不能在本机运行。"
+            say "This is the $PLATFORM_LABEL $ARCH build; it cannot run on this host."
         fi
     else
         say ""
-        say "ClaudeX 就绪后，运行脚本目录中的 $CLAUDEX_EXE 即可。"
+        say "Once ClaudeX is ready, run $CLAUDEX_EXE in the script folder."
     fi
 
     if [ "$CLAUDEX_MISSING_PLACEHOLDER" -eq 1 ]; then
         say ""
-        say "${YELLOW}注意: ClaudeX 的 GitHub 仓库地址仍是占位符。${RESET}"
-        say "      项目发布后重新运行本脚本，或使用："
+        say "${YELLOW}Note: the ClaudeX GitHub repository is still a placeholder.${RESET}"
+        say "      Re-run this script after publishing, or use:"
         say "      $0 --claudex-repo <owner>/<repo>"
     fi
 
     if [ "$WARNINGS" -gt 0 ]; then
         say ""
-        say "本次运行有 $WARNINGS 条警告，详见上方输出。"
+        say "This run produced $WARNINGS warning(s); see the output above."
     fi
 }
 
 # ---------------------------------------------------------------------------
-# 主流程
+# Main flow
 # ---------------------------------------------------------------------------
 
 install_current_target() {
@@ -1793,7 +1793,7 @@ install_current_target() {
     if [ "$DO_CLAUDEX" -eq 1 ]; then
         ensure_claudex || true
     else
-        info "跳过 ClaudeX 下载/更新（--no-claudex）"
+        info "Skipping ClaudeX download/update (--no-claudex)"
     fi
 
     LAUNCHER=$(find_existing_claudex 2>/dev/null || true)
@@ -1804,7 +1804,7 @@ install_current_target() {
     if [ "$DO_CLAUDE" -eq 1 ]; then
         ensure_claude || true
     else
-        info "跳过 Claude Code 下载/更新（--no-claude）"
+        info "Skipping Claude Code download/update (--no-claude)"
     fi
 
     native=0
@@ -1822,34 +1822,34 @@ install_current_target() {
         if [ -f "$CONFIG_FILE" ]; then
             cp -p "$CONFIG_FILE" "$CONFIG_FILE.invalid" 2>/dev/null || true
         fi
-        warn "写入默认配置 $CONFIG_NAME"
-        write_fallback_config || die "无法写入 $CONFIG_FILE"
+        warn "Writing default config $CONFIG_NAME"
+        write_fallback_config || die "cannot write $CONFIG_FILE"
     fi
 
-    apply_config || die "无法更新 $CONFIG_FILE"
-    verify_config_values || die "配置文件校验失败：$CONFIG_FILE"
+    apply_config || die "cannot update $CONFIG_FILE"
+    verify_config_values || die "config validation failed: $CONFIG_FILE"
 
     mkdir -p "$DATA_DIR" "$PORTABLE_TEMP_DIR" 2>/dev/null ||
-        warn "无法创建数据目录：$DATA_DIR"
+        warn "cannot create data directory: $DATA_DIR"
 
     if [ -f "$CLAUDE_BIN" ]; then
         chmod 755 "$CLAUDE_BIN" 2>/dev/null || true
     else
         if [ "$DO_CLAUDE" -eq 1 ]; then
-            err "Claude Code 未安装到 $CLAUDE_BIN"
+            err "Claude Code was not installed to $CLAUDE_BIN"
             HARD_FAIL=1
         else
-            info "Claude Code 未安装（已跳过下载）"
+            info "Claude Code not installed (download skipped)"
         fi
     fi
 
     if [ -z "$LAUNCHER" ] || [ ! -f "$LAUNCHER" ]; then
         if [ "$DO_CLAUDEX" -eq 0 ]; then
-            info "ClaudeX 未安装（已跳过下载）"
+            info "ClaudeX not installed (download skipped)"
         elif [ "$CLAUDEX_MISSING_PLACEHOLDER" -eq 1 ]; then
-            warn "ClaudeX 尚未安装：仓库地址仍是占位符。"
+            warn "ClaudeX is not installed yet: the repository is still a placeholder."
         else
-            err "ClaudeX 未安装"
+            err "ClaudeX not installed"
             HARD_FAIL=1
         fi
     fi
@@ -1864,9 +1864,9 @@ print_multi_summary() {
     }
 
     say ""
-    say "${BOLD}================ 完成 ================${RESET}"
-    say "  安装目录: $(display_path "$BASE_ROOT")"
-    say "  已安装目标:"
+    say "${BOLD}================ Done ================${RESET}"
+    say "  Install dir:  $(display_path "$BASE_ROOT")"
+    say "  Targets:"
     for target in $MULTI_TARGETS; do
         platform=${target%-*}
         arch=${target#*-}
@@ -1875,11 +1875,11 @@ print_multi_summary() {
         if [ -f "$BASE_ROOT/$target/$exe" ]; then
             say "    $label $(display_path "$BASE_ROOT/$target/$exe")"
         else
-            say "    $label 未安装"
+            say "    $label not installed"
         fi
     done
     say ""
-    say "  每个目标目录都包含自己的 $CONFIG_NAME、data/ 和 bin/。"
+    say "  Each target folder has its own $CONFIG_NAME, data/, and bin/."
 }
 
 main() {
@@ -1909,7 +1909,7 @@ main() {
             OS=${target%-*}
             ARCH=${target#*-}
             ROOT="$BASE_ROOT/$target"
-            mkdir -p "$ROOT" || die "无法创建目录：$ROOT"
+            mkdir -p "$ROOT" || die "cannot create directory: $ROOT"
             install_current_target
         done
         print_multi_summary
