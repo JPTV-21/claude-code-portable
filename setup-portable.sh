@@ -230,7 +230,7 @@ Options:
       --no-claude          skip the Claude Code download/update
       --platform OS        target platform: windows/macos/linux/all (default: detected)
       --arch ARCH          CPU architecture: x64/arm64/all (default: detected)
-      --all                download all six platform/arch combinations, one folder each
+      --all                download all six platform/arch combinations into one folder
       --install-dir DIR    install directory (default: script folder)
   -y, --yes                use defaults without interactive prompts
       --claudex-repo REPO  ClaudeX repository (owner/repo)
@@ -471,25 +471,27 @@ apply_platform_vars() {
         windows)
             PLATFORM_LABEL="Windows"
             CLAUDE_EXE="claude.exe"
-            CLAUDEX_EXE="ClaudeX.exe"
             ;;
         macos)
             PLATFORM_LABEL="macOS"
             CLAUDE_EXE="claude"
-            CLAUDEX_EXE="ClaudeX"
             ;;
         linux)
             PLATFORM_LABEL="Linux"
             CLAUDE_EXE="claude"
-            CLAUDEX_EXE="ClaudeX"
             ;;
     esac
+
+    # Every launcher carries its platform and architecture so all builds can
+    # share the install root without overwriting each other.
+    CLAUDEX_EXE="ClaudeX-$OS-$ARCH"
+    [ "$OS" = "windows" ] && CLAUDEX_EXE="$CLAUDEX_EXE.exe"
 
     CLAUDE_DEST="$ROOT/bin/$ARCH/$OS"
     CLAUDE_BIN="$CLAUDE_DEST/$CLAUDE_EXE"
     CLAUDE_MARKER="$CLAUDE_DEST/.claude-version"
     CLAUDEX_BIN="$ROOT/$CLAUDEX_EXE"
-    CLAUDEX_MARKER="$ROOT/.claudex-version"
+    CLAUDEX_MARKER="$ROOT/.claudex-version-$OS-$ARCH"
     CLAUDE_PATH_CONFIG="bin/$ARCH/$OS/claude*"
     CONFIG_FILE="$ROOT/$CONFIG_NAME"
     DATA_DIR="$ROOT/data"
@@ -545,7 +547,7 @@ prompt_platform_arch() {
     [ "$ALL_ARCH" -eq 1 ] && arch_count=2
     total_count=$((platform_count * arch_count))
     if [ "$total_count" -gt 1 ]; then
-        info "Downloading $total_count platform/architecture combinations, one folder each."
+        info "Downloading $total_count platform/architecture combinations into one folder."
     elif [ "$OS" != "$DETECTED_OS" ] || [ "$ARCH" != "$DETECTED_ARCH" ]; then
         info "Downloading the $OS/$ARCH build (it cannot run on this host)."
     fi
@@ -1416,17 +1418,10 @@ find_existing_claudex() {
         fi
     fi
 
-    for candidate in \
-        "$ROOT/$CLAUDEX_EXE" \
-        "$ROOT/ClaudeX.exe" \
-        "$ROOT/claudex.exe" \
-        "$ROOT/ClaudeX" \
-        "$ROOT/claudex"; do
-        if [ -f "$candidate" ]; then
-            printf '%s\n' "$candidate"
-            return 0
-        fi
-    done
+    if [ -f "$ROOT/$CLAUDEX_EXE" ]; then
+        printf '%s\n' "$ROOT/$CLAUDEX_EXE"
+        return 0
+    fi
     return 1
 }
 
@@ -1796,15 +1791,17 @@ install_current_target() {
         info "Skipping ClaudeX download/update (--no-claudex)"
     fi
 
-    LAUNCHER=$(find_existing_claudex 2>/dev/null || true)
-    if [ -n "$LAUNCHER" ]; then
-        chmod 755 "$LAUNCHER" 2>/dev/null || true
-    fi
-
     if [ "$DO_CLAUDE" -eq 1 ]; then
         ensure_claude || true
     else
         info "Skipping Claude Code download/update (--no-claude)"
+    fi
+}
+
+configure_install() {
+    LAUNCHER=$(find_existing_claudex 2>/dev/null || true)
+    if [ -n "$LAUNCHER" ]; then
+        chmod 755 "$LAUNCHER" 2>/dev/null || true
     fi
 
     native=0
@@ -1856,13 +1853,6 @@ install_current_target() {
 }
 
 print_multi_summary() {
-    target_exe() {
-        case "$1" in
-            windows) printf 'ClaudeX.exe' ;;
-            *) printf 'ClaudeX' ;;
-        esac
-    }
-
     say ""
     say "${BOLD}================ Done ================${RESET}"
     say "  Install dir:  $(display_path "$BASE_ROOT")"
@@ -1870,16 +1860,17 @@ print_multi_summary() {
     for target in $MULTI_TARGETS; do
         platform=${target%-*}
         arch=${target#*-}
-        exe=$(target_exe "$platform")
+        exe="ClaudeX-$platform-$arch"
+        [ "$platform" = "windows" ] && exe="$exe.exe"
         label=$(printf '%-14s' "$platform/$arch")
-        if [ -f "$BASE_ROOT/$target/$exe" ]; then
-            say "    $label $(display_path "$BASE_ROOT/$target/$exe")"
+        if [ -f "$BASE_ROOT/$exe" ]; then
+            say "    $label $(display_path "$BASE_ROOT/$exe")"
         else
             say "    $label not installed"
         fi
     done
     say ""
-    say "  Each target folder has its own $CONFIG_NAME, data/, and bin/."
+    say "  All launchers share this folder; Claude Code builds are under bin/<arch>/<platform>/."
 }
 
 main() {
@@ -1904,21 +1895,32 @@ main() {
     done
 
     set -- $MULTI_TARGETS
-    if [ "$#" -gt 1 ]; then
-        for target in "$@"; do
-            OS=${target%-*}
-            ARCH=${target#*-}
-            ROOT="$BASE_ROOT/$target"
-            mkdir -p "$ROOT" || die "cannot create directory: $ROOT"
-            install_current_target
-        done
-        print_multi_summary
-    else
-        target=$1
+    for target in "$@"; do
         OS=${target%-*}
         ARCH=${target#*-}
         ROOT=$BASE_ROOT
         install_current_target
+    done
+
+    # One shared config. Prefer the host target; otherwise use the first one.
+    config_target=""
+    for target in "$@"; do
+        if [ "$target" = "$DETECTED_OS-$DETECTED_ARCH" ]; then
+            config_target=$target
+            break
+        fi
+    done
+    [ -n "$config_target" ] || config_target=$1
+
+    OS=${config_target%-*}
+    ARCH=${config_target#*-}
+    ROOT=$BASE_ROOT
+    apply_platform_vars
+    configure_install
+
+    if [ "$#" -gt 1 ]; then
+        print_multi_summary
+    else
         print_summary
     fi
 

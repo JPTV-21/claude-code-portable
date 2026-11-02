@@ -57,7 +57,7 @@ Options:
   -NoClaude             skip the Claude Code download/update
   -Platform PLATFORM    install platform: windows/macos/linux/all (default: detected)
   -Architecture ARCH    CPU architecture: x64/arm64/all (default: detected)
-  -All                  download all six platform/arch combinations, one folder each
+  -All                  download all six platform/arch combinations into one folder
   -InstallDir DIR       install directory (default: script folder)
   -Yes                  use defaults without interactive prompts
   -NoProgress           do not show the download progress meter
@@ -121,9 +121,19 @@ function Resolve-InstallDir {
     return $Dir
 }
 
-function Get-LauncherExeName {
+function Get-SourceLauncherExeName {
     if ($script:TargetPlatform -eq 'windows') { return 'ClaudeX.exe' }
     return 'ClaudeX'
+}
+
+# Every build gets a platform/arch suffix, including the local one, so all
+# launchers can share the install root without overwriting each other.
+function Get-LauncherFileName {
+    param([string]$Platform, [string]$Arch)
+
+    $base = "ClaudeX-$Platform-$Arch"
+    if ($Platform -eq 'windows') { return "$base.exe" }
+    return $base
 }
 
 function Get-ClaudeExeName {
@@ -424,12 +434,13 @@ function Test-AssetHash {
 }
 
 function Install-ClaudeX {
-    $exeName = Get-LauncherExeName
-    $target = Join-Path $script:Root $exeName
+    param([Parameter(Mandatory = $true)][string]$LauncherName)
+
+    $target = Join-Path $script:Root $LauncherName
 
     if ((Test-Path -LiteralPath $target) -and -not $Update) {
         Write-Ok "ClaudeX already exists; skipping download (use -Update to force an update)"
-        return
+        return $target
     }
 
     $release = Get-ReleaseInfo -Repository $Repo
@@ -449,13 +460,15 @@ function Install-ClaudeX {
 
     Expand-ReleaseArchive -Path $zip -Destination $extractDir
 
+    $sourceExeName = Get-SourceLauncherExeName
     $exe = Get-ChildItem -LiteralPath $extractDir -Recurse -File |
-        Where-Object { $_.Name -ieq $exeName } |
+        Where-Object { $_.Name -ieq $sourceExeName } |
         Select-Object -First 1
-    if (-not $exe) { throw "Cannot find $exeName in the ClaudeX archive." }
+    if (-not $exe) { throw "Cannot find $sourceExeName in the ClaudeX archive." }
 
     Copy-Item -LiteralPath $exe.FullName -Destination $target -Force
     Write-Ok "ClaudeX installed: $target"
+    return $target
 }
 
 function Install-ClaudeCode {
@@ -549,17 +562,19 @@ function Show-Summary {
         Write-Host "  Install directory: $BaseRoot"
         Write-Host '  Installed targets:'
         foreach ($item in $script:InstalledTargets) {
-            $exeName = if ($item.Platform -eq 'windows') { 'ClaudeX.exe' } else { 'ClaudeX' }
-            $launcher = Join-Path $item.Root $exeName
-            $state = if (Test-Path -LiteralPath $launcher) { $launcher } else { 'not installed' }
+            $state = if ($item.Launcher -and (Test-Path -LiteralPath $item.Launcher)) {
+                $item.Launcher
+            } else {
+                'not installed'
+            }
             Write-Host ("    {0,-14} {1}" -f "$($item.Platform)/$($item.Arch)", $state)
         }
         Write-Host ''
-        Write-Host 'Each target folder has its own claudex-config.json, data/, and bin/.'
+        Write-Host '  All launchers share this folder; Claude Code builds are under bin/<arch>/<platform>/.'
         return
     }
 
-    $launcher = Join-Path $script:Root (Get-LauncherExeName)
+    $launcher = Join-Path $script:Root (Get-LauncherFileName -Platform $script:TargetPlatform -Arch $script:TargetArch)
     $claude = Join-Path $script:Root ("bin\" + $script:TargetArch + "\" + $script:TargetPlatform + "\" + (Get-ClaudeExeName))
     $config = Join-Path $script:Root 'claudex-config.json'
 
@@ -586,6 +601,9 @@ function Show-Summary {
 $script:Root = $null
 $script:TargetArch = $null
 $script:TargetPlatform = $null
+$script:DetectedArch = $null
+$script:DetectedPlatform = $null
+$script:MultiTarget = $false
 $script:WorkDir = $null
 $script:AssumeYes = $false
 $script:ShowProgress = $false
@@ -599,7 +617,9 @@ try {
     }
 
     $script:Root = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
-    $script:TargetArch = Get-NormalizedArch
+    $script:DetectedArch = Get-NormalizedArch
+    $script:TargetArch = $script:DetectedArch
+    $script:DetectedPlatform = 'windows'
     $script:TargetPlatform = 'windows'
     $script:AssumeYes = [bool]$Yes
 
@@ -648,11 +668,12 @@ try {
         }
     }
     $multiTarget = $targets.Count -gt 1
+    $script:MultiTarget = $multiTarget
 
     Write-Host 'ClaudeX + Claude Code portable setup (PowerShell)' -ForegroundColor White
     Write-Host "  Install directory: $baseRoot"
     if ($multiTarget) {
-        Write-Host "  Targets: $($targets.Count) combinations (one folder each)"
+        Write-Host "  Targets: $($targets.Count) combinations in one folder"
     } else {
         Write-Host "  Target:   $script:TargetPlatform $script:TargetArch"
         if ($script:TargetPlatform -ne 'windows') {
@@ -665,25 +686,36 @@ try {
     foreach ($target in $targets) {
         $script:TargetPlatform = $target.Platform
         $script:TargetArch = $target.Arch
+        $script:Root = $baseRoot
 
-        if ($multiTarget) {
-            $script:Root = Join-Path $baseRoot ("$($target.Platform)-$($target.Arch)")
-            New-Item -ItemType Directory -Force -Path $script:Root | Out-Null
-            Write-Step "Installing $($target.Platform)/$($target.Arch) -> $script:Root"
-        } else {
-            $script:Root = $baseRoot
+        $launcherName = Get-LauncherFileName -Platform $target.Platform -Arch $target.Arch
+        Write-Step "Installing $($target.Platform)/$($target.Arch) ($launcherName)"
+
+        $launcherPath = $null
+        if (-not $NoClaudex) {
+            $launcherPath = Install-ClaudeX -LauncherName $launcherName
         }
-
-        if (-not $NoClaudex) { Install-ClaudeX }
         if (-not $NoClaude) { Install-ClaudeCode }
-        Write-LauncherConfig
 
         $script:InstalledTargets += [pscustomobject]@{
             Platform = $target.Platform
             Arch     = $target.Arch
             Root     = $script:Root
+            Launcher = $launcherPath
         }
     }
+
+    # A single config is shared by every target. Prefer the host target;
+    # otherwise fall back to the first target in the list.
+    $configTarget = $targets | Where-Object {
+        $_.Platform -eq $script:DetectedPlatform -and $_.Arch -eq $script:DetectedArch
+    } | Select-Object -First 1
+    if (-not $configTarget) { $configTarget = $targets[0] }
+
+    $script:TargetPlatform = $configTarget.Platform
+    $script:TargetArch = $configTarget.Arch
+    $script:Root = $baseRoot
+    Write-LauncherConfig
 
     Show-Summary -BaseRoot $baseRoot -Multi:$multiTarget
 } catch {

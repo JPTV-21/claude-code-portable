@@ -1,6 +1,6 @@
 <p align="center">
   <strong>Portable</strong>, zero-dependency setup for the ClaudeX launcher and
-  the Claude Code CLI — one self-contained folder per platform and architecture.
+  the Claude Code CLI — all builds in one self-contained folder.
 </p>
 
 > **Unofficial project.** These scripts are independent and community-made.
@@ -62,32 +62,32 @@ The POSIX script uses only standard system tools: `sh`, `curl`, `perl` with
 
 ## Layout
 
-A single target installs directly into the install directory:
+Every build is installed into the same folder and named after its platform and
+architecture, so all variants can coexist without overwriting each other:
 
 ```text
 install-dir/
-  ClaudeX.exe                  launcher (ClaudeX on macOS/Linux)
+  ClaudeX-windows-x64.exe
+  ClaudeX-windows-arm64.exe
+  ClaudeX-macos-x64
+  ClaudeX-macos-arm64
+  ClaudeX-linux-x64
+  ClaudeX-linux-arm64
   claudex-config.json
   claudex-theme.json           created on first launch
   data/                        portable CLAUDE_CONFIG_DIR
-  bin/<arch>/<platform>/claude[.exe]
+  bin/x64/windows/claude.exe
+  bin/arm64/windows/claude.exe
+  bin/x64/macos/claude
+  ...
 ```
 
-With `all`, every target gets its own self-contained folder, so launchers never
-overwrite each other:
+Only the selected targets are downloaded. A single target produces just its own
+launcher, for example `ClaudeX-linux-arm64`.
 
-```text
-install-dir/
-  windows-x64/
-  windows-arm64/
-  macos-x64/
-  macos-arm64/
-  linux-x64/
-  linux-arm64/
-```
-
-Each folder contains its own launcher, `claudex-config.json`, `data/`, and
-`bin/`.
+Launcher binaries always live in the install root (`./`), never inside `bin/`.
+`claudex-config.json` points `claudePath` at the host target when it was
+installed, otherwise at the first selected target.
 
 ## Options
 
