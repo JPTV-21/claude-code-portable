@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to publish (for example v1.0.0)'
+        required: true
+        default: v1.0.0
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Publish setup scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate checksums
+        run: |
+          sha256sum setup-portable.ps1 setup-portable.sh > SHASUMS256.txt
+          cat SHASUMS256.txt
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          name: Setup scripts ${{ inputs.tag || github.ref_name }}
+          generate_release_notes: true
+          files: |
+            setup-portable.ps1
+            setup-portable.sh
+            SHASUMS256.txt
+          fail_on_unmatched_files: true
