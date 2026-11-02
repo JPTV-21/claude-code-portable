@@ -5,8 +5,8 @@
 
 .DESCRIPTION
     下载并安装 ClaudeX 与 Claude Code 到本脚本所在目录，生成便携配置。
-    不依赖 Git Bash、perl 或外部解压工具；只使用 Windows 自带的
-    PowerShell 和（可选的）curl.exe。
+    不依赖 Git Bash、perl、curl 或外部解压工具；只使用 Windows 自带的
+    PowerShell 和（处理跨平台 tar.gz 时的）系统 tar.exe。
 
 .EXAMPLE
     .\setup-portable.ps1
@@ -35,6 +35,9 @@ param(
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+
+# Windows PowerShell 5.1 may still negotiate TLS 1.0 by default.
+[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
 
 function Write-Step { param([string]$Message) Write-Host "==> $Message" -ForegroundColor Cyan }
 function Write-Ok   { param([string]$Message) Write-Host "  ok $Message" -ForegroundColor Green }
@@ -193,61 +196,132 @@ function Get-NormalizedArch {
     }
 }
 
-function Get-CurlPath {
-    $cmd = Get-Command curl.exe -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Source }
-    return $null
+function Write-TransferProgress {
+    param(
+        [long]$Downloaded,
+        [long]$Total,
+        [double]$Speed,
+        [string]$Label,
+        [switch]$Done
+    )
+
+    if (-not $script:ShowProgress) { return }
+
+    $mb = 1048576.0
+    $downMb = $Downloaded / $mb
+    $speedMb = $Speed / $mb
+    if ($Total -gt 0) {
+        $pct = [math]::Min(100, [math]::Floor($Downloaded * 100.0 / $Total))
+        $text = "{0}: {1,3}%  {2:N1}/{3:N1} MB  {4:N1} MB/s" -f `
+            $Label, $pct, $downMb, ($Total / $mb), $speedMb
+    } else {
+        $text = "{0}: {1:N1} MB  {2:N1} MB/s" -f $Label, $downMb, $speedMb
+    }
+
+    Write-Host "`r  $text" -NoNewline
+    if ($Done) { Write-Host '' }
 }
 
+# Downloads with retry, byte-range resume, and a live speed/size meter.
+# Uses only System.Net from .NET Framework; no curl or other executables.
 function Invoke-DownloadWithRetry {
     param(
         [Parameter(Mandatory = $true)][string]$Url,
         [Parameter(Mandatory = $true)][string]$Destination,
         [Parameter(Mandatory = $true)][string]$Label,
         [hashtable]$Headers = @{},
-        [int]$Attempts = 3
+        [int]$Attempts = 3,
+        [switch]$Quiet
     )
 
-    $curl = Get-CurlPath
-    for ($i = 1; $i -le $Attempts; $i++) {
+    $showProgress = $script:ShowProgress -and (-not $Quiet)
+
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        $response = $null
+        $stream = $null
+        $file = $null
         try {
-            if ($curl) {
-                # curl's default meter shows downloaded/total size and speed.
-                $curlArgs = @('-fL')
-                if (-not $script:ShowProgress) { $curlArgs += '-sS' }
-                $curlArgs += @(
-                    '--retry', '2', '--retry-delay', '1',
-                    '--connect-timeout', '30',
-                    '--speed-limit', '1024', '--speed-time', '120',
-                    '-C', '-',
-                    '-H', 'User-Agent: claudex-setup'
-                )
-                foreach ($key in $Headers.Keys) {
-                    $curlArgs += @('-H', "${key}: $($Headers[$key])")
-                }
-                $curlArgs += @('-o', $Destination, $Url)
-                & $curl @curlArgs
-                if ($LASTEXITCODE -eq 0) { return }
-                # curl 33: ranges unsupported; curl 22: HTTP error such as 416
-                # when the partial file is already complete. Restart cleanly.
-                if (($LASTEXITCODE -eq 33 -or $LASTEXITCODE -eq 22) -and
-                    (Test-Path -LiteralPath $Destination)) {
-                    Remove-Item -LiteralPath $Destination -Force -ErrorAction SilentlyContinue
-                }
-                throw "curl exit $LASTEXITCODE"
+            $request = [System.Net.HttpWebRequest]::Create($Url)
+            $request.UserAgent = 'claudex-setup'
+            $request.AllowAutoRedirect = $true
+            $request.Timeout = 30000
+            $request.ReadWriteTimeout = 120000
+            if ($env:CLAUDEX_PROXY) {
+                $request.Proxy = New-Object System.Net.WebProxy($env:CLAUDEX_PROXY)
+            } else {
+                $request.Proxy = $null
             }
 
-            # Fallback without curl. Invoke-WebRequest cannot resume partial files.
-            if (Test-Path -LiteralPath $Destination) {
-                Remove-Item -LiteralPath $Destination -Force -ErrorAction SilentlyContinue
+            foreach ($key in $Headers.Keys) {
+                switch ($key.ToLowerInvariant()) {
+                    'user-agent' { $request.UserAgent = $Headers[$key] }
+                    'accept' { $request.Accept = $Headers[$key] }
+                    'authorization' { $request.Headers['Authorization'] = $Headers[$key] }
+                    default { $request.Headers[$key] = $Headers[$key] }
+                }
             }
-            Invoke-WebRequest -Uri $Url -OutFile $Destination -UseBasicParsing -TimeoutSec 120
+
+            $existing = 0
+            if (Test-Path -LiteralPath $Destination) {
+                $existing = (Get-Item -LiteralPath $Destination).Length
+            }
+            if ($existing -gt 0) { $request.AddRange($existing) }
+
+            $response = $request.GetResponse()
+            $status = [int]$response.StatusCode
+            $total = $response.ContentLength
+            if ($status -eq 206) {
+                if ($total -gt 0) { $total += $existing }
+            } else {
+                # The server ignored the range; overwrite instead of appending.
+                $existing = 0
+            }
+
+            $mode = if ($existing -gt 0) { [System.IO.FileMode]::Append } else { [System.IO.FileMode]::Create }
+            $file = New-Object System.IO.FileStream($Destination, $mode, [System.IO.FileAccess]::Write)
+            $stream = $response.GetResponseStream()
+            $buffer = New-Object byte[] 131072
+            $downloaded = [long]$existing
+            $lastTime = Get-Date
+            $lastBytes = $downloaded
+            $speed = 0.0
+
+            while (($read = $stream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                $file.Write($buffer, 0, $read)
+                $downloaded += $read
+                $now = Get-Date
+                $elapsed = ($now - $lastTime).TotalSeconds
+                if ($elapsed -ge 0.5) {
+                    $speed = ($downloaded - $lastBytes) / $elapsed
+                    $lastTime = $now
+                    $lastBytes = $downloaded
+                    if ($showProgress) {
+                        Write-TransferProgress -Downloaded $downloaded -Total $total -Speed $speed -Label $Label
+                    }
+                }
+            }
+
+            if ($showProgress) {
+                Write-TransferProgress -Downloaded $downloaded -Total $total -Speed $speed -Label $Label -Done
+            }
             return
         } catch {
-            if ($i -lt $Attempts) {
-                Write-Warn "$Label 下载中断（尝试 $i/$Attempts），2 秒后继续…"
+            $statusCode = $null
+            if ($_.Exception.Response) {
+                $statusCode = [int]$_.Exception.Response.StatusCode
+            }
+            # 416: the partial file is already complete; restart cleanly.
+            if ($statusCode -eq 416 -and (Test-Path -LiteralPath $Destination)) {
+                Remove-Item -LiteralPath $Destination -Force -ErrorAction SilentlyContinue
+            }
+            if ($attempt -lt $Attempts) {
+                Write-Warn "$Label 下载中断（尝试 $attempt/$Attempts），2 秒后继续…"
                 Start-Sleep -Seconds 2
             }
+        } finally {
+            if ($file) { $file.Dispose() }
+            if ($stream) { $stream.Dispose() }
+            if ($response) { $response.Dispose() }
         }
     }
 
@@ -261,28 +335,18 @@ function Get-ReleaseInfo {
         return $script:ReleaseCache[$Repository]
     }
 
-    $curl = Get-CurlPath
-    if (-not $curl) {
-        throw '找不到 curl.exe；请使用 Windows 10 1803 或更高版本。'
-    }
-
     $out = Join-Path $script:WorkDir ("release-" + [guid]::NewGuid().ToString('N').Substring(0, 6) + '.json')
     $url = "https://api.github.com/repos/$Repository/releases/latest"
     $token = if ($env:GITHUB_TOKEN) { $env:GITHUB_TOKEN } else { $env:GH_TOKEN }
 
-    $curlArgs = @(
-        '-fsSL', '--retry', '3', '--retry-delay', '1',
-        '--connect-timeout', '20', '--max-time', '60',
-        '-H', 'User-Agent: claudex-setup',
-        '-H', 'Accept: application/vnd.github+json'
-    )
-    if ($token) { $curlArgs += @('-H', "Authorization: Bearer $token") }
-    $curlArgs += @('-o', $out, $url)
-
-    & $curl @curlArgs
-    if ($LASTEXITCODE -ne 0) {
-        throw "无法获取 $Repository 的 release 信息（GitHub API 不可达）。"
+    $headers = @{
+        'Accept'     = 'application/vnd.github+json'
+        'User-Agent' = 'claudex-setup'
     }
+    if ($token) { $headers['Authorization'] = "Bearer $token" }
+
+    Invoke-DownloadWithRetry -Url $url -Destination $out -Label "$Repository release" `
+        -Headers $headers -Quiet
 
     $release = Get-Content -LiteralPath $out -Raw -Encoding UTF8 | ConvertFrom-Json
     $script:ReleaseCache[$Repository] = $release

@@ -1,6 +1,6 @@
 <p align="center">
-  <strong>Portable</strong> setup scripts for the ClaudeX launcher and the
-  Claude Code CLI — one self-contained folder per platform and architecture.
+  <strong>Portable</strong>, zero-dependency setup for the ClaudeX launcher and
+  the Claude Code CLI — one self-contained folder per platform and architecture.
 </p>
 
 > **Unofficial project.** These scripts are independent and community-made.
@@ -13,41 +13,51 @@ published in [JPTV-21/Claudex](https://github.com/JPTV-21/Claudex/releases);
 the Claude Code CLI is downloaded from
 [anthropics/claude-code](https://github.com/anthropics/claude-code/releases).
 
-## Requirements
+## Quick start (always the latest script)
 
-- **Windows, PowerShell version:** PowerShell 5.1. Windows 10 1803+ already
-  includes `curl.exe` and `tar.exe`, so no Git is required.
-- **Windows, `.bat` version:** Git for Windows (Git Bash).
-- **Linux / macOS:** POSIX `sh`, `curl`, `perl` with `JSON::PP`, and the
-  standard `find` / `awk` / `tar` tools.
+### Windows
 
-## Quick start
-
-### Windows (no Git required)
+Windows PowerShell 5.1 is built into Windows 10/11. **No Git, curl, perl, or
+other tools are required.**
 
 ```powershell
-.\setup-portable.ps1
+irm 'https://api.github.com/repos/JPTV-21/claude-code-portable/contents/setup-portable.ps1' -Headers @{'Accept'='application/vnd.github.raw';'User-Agent'='claudex-setup'} | iex
 ```
 
-### Windows with Git for Windows
+This downloads the newest `setup-portable.ps1` from the default branch and runs
+it in the current directory. The script then asks for the target platform,
+architecture, and install directory.
+
+To pass options to an online run:
 
 ```powershell
-.\setup-portable.bat
+$src = irm 'https://api.github.com/repos/JPTV-21/claude-code-portable/contents/setup-portable.ps1' -Headers @{'Accept'='application/vnd.github.raw';'User-Agent'='claudex-setup'}
+& ([scriptblock]::Create($src)) -All -InstallDir D:\ClaudexAll
 ```
 
 ### Linux / macOS
 
+Download the latest script, then run it:
+
 ```sh
+curl -fsSL -H 'Accept: application/vnd.github.raw' -H 'User-Agent: claudex-setup' \
+  'https://api.github.com/repos/JPTV-21/claude-code-portable/contents/setup-portable.sh' \
+  -o setup-portable.sh
 sh setup-portable.sh
 ```
 
-The scripts ask for:
+The POSIX script uses only standard system tools: `sh`, `curl`, `perl` with
+`JSON::PP`, and `find` / `awk` / `tar`.
 
-- **Platform and architecture** — detected values are shown as defaults. Enter
-  `all` to download all six combinations.
-- **Install directory** — defaults to the script's folder. If the path does not
-  exist, the script asks whether to create it.
-- **Download progress** — a live meter with transferred/total size and speed.
+## What the scripts do
+
+- Detect the current platform and architecture and use them as defaults.
+- Let you pick another target or `all` (six combinations).
+- Download the matching ClaudeX release and Claude Code CLI with retry and
+  byte-range resume.
+- Show a live progress meter with transferred/total size and speed.
+- Write a portable `claudex-config.json` pointing at `./data` and
+  `./bin/<arch>/<platform>`.
 
 ## Layout
 
@@ -106,6 +116,24 @@ Each folder contains its own launcher, `claudex-config.json`, `data/`, and
 sh setup-portable.sh --all --install-dir /opt/claudex --yes
 sh setup-portable.sh --platform linux --arch arm64 --no-claude --yes
 ```
+
+### Proxy
+
+Downloads go direct by default. Set `CLAUDEX_PROXY` to a proxy URL if your
+network requires one:
+
+```powershell
+$env:CLAUDEX_PROXY = 'http://127.0.0.1:7890'
+```
+
+## Notes
+
+- On Windows, the only non-PowerShell component used is the built-in
+  `System32\tar.exe`, and only when installing macOS/Linux targets. Windows
+  targets use `.zip` and `Expand-Archive`.
+- Execution policy: if PowerShell blocks local scripts, use
+  `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once, or run the online
+  command above (it uses `iex` and does not save a script file).
 
 ## License
 
