@@ -58,7 +58,8 @@ The POSIX script uses only standard system tools: `sh`, `curl`, `perl` with
   byte-range resume.
 - Show a live progress meter with transferred/total size and speed.
 - Write a portable `claudex-config.json` pointing at `./data` and
-  `./bin/<arch>/<platform>`.
+  `./bin/{arch}/{platform}`, letting ClaudeX resolve the folder for the
+  machine that runs the launcher.
 
 ## Layout
 
@@ -76,9 +77,9 @@ install-dir/
   claudex-config.json
   claudex-theme.json           created on first launch
   data/                        portable CLAUDE_CONFIG_DIR
-  bin/x64/windows/claude.exe
+  bin/x86_64/windows/claude.exe
   bin/arm64/windows/claude.exe
-  bin/x64/macos/claude
+  bin/x86_64/macos/claude
   ...
 ```
 
@@ -86,8 +87,10 @@ Only the selected targets are downloaded. A single target produces just its own
 launcher, for example `ClaudeX-linux-arm64`.
 
 Launcher binaries always live in the install root (`./`), never inside `bin/`.
-`claudex-config.json` points `claudePath` at the host target when it was
-installed, otherwise at the first selected target.
+`claudex-config.json` points `claudePath` at `bin/{arch}/{platform}/claude*`,
+so the same folder works when it is moved to any of the installed targets.
+Architecture folders use ClaudeX's names (`x86_64`, `arm64`), while release
+assets keep the upstream `x64`/`arm64` naming.
 
 ## Options
 

@@ -141,6 +141,14 @@ function Get-ClaudeExeName {
     return 'claude'
 }
 
+# Release assets use x64/arm64, but ClaudeX resolves {arch} to x86_64/arm64.
+# Folders under bin/ follow the ClaudeX names so the {arch} template matches.
+function Get-ClaudeArchName {
+    param([string]$Arch)
+    if ($Arch -eq 'x64') { return 'x86_64' }
+    return $Arch
+}
+
 function Get-ClaudexAssetName {
     switch ($script:TargetPlatform) {
         'windows' { return "ClaudeX-windows-$script:TargetArch.zip" }
@@ -473,7 +481,8 @@ function Install-ClaudeX {
 
 function Install-ClaudeCode {
     $exeName = Get-ClaudeExeName
-    $destDir = Join-Path $script:Root ("bin\" + $script:TargetArch + "\" + $script:TargetPlatform)
+    $claudeArch = Get-ClaudeArchName -Arch $script:TargetArch
+    $destDir = Join-Path $script:Root ("bin\" + $claudeArch + "\" + $script:TargetPlatform)
     $dest = Join-Path $destDir $exeName
 
     if ((Test-Path -LiteralPath $dest) -and -not $Update) {
@@ -509,7 +518,9 @@ function Install-ClaudeCode {
 
 function Write-LauncherConfig {
     $configPath = Join-Path $script:Root 'claudex-config.json'
-    $claudePath = "bin/$script:TargetArch/$script:TargetPlatform/claude*"
+    # Let ClaudeX expand {arch}/{platform} so a folder prepared on one machine
+    # still resolves correctly when it is moved to the target machine.
+    $claudePath = 'bin/{arch}/{platform}/claude*'
 
     $cfg = $null
     if (Test-Path -LiteralPath $configPath) {
@@ -575,7 +586,8 @@ function Show-Summary {
     }
 
     $launcher = Join-Path $script:Root (Get-LauncherFileName -Platform $script:TargetPlatform -Arch $script:TargetArch)
-    $claude = Join-Path $script:Root ("bin\" + $script:TargetArch + "\" + $script:TargetPlatform + "\" + (Get-ClaudeExeName))
+    $claudeArch = Get-ClaudeArchName -Arch $script:TargetArch
+    $claude = Join-Path $script:Root ("bin\" + $claudeArch + "\" + $script:TargetPlatform + "\" + (Get-ClaudeExeName))
     $config = Join-Path $script:Root 'claudex-config.json'
 
     Write-Host ''
@@ -586,7 +598,7 @@ function Show-Summary {
     Write-Host ('  Claude Code:  ' + $(if (Test-Path -LiteralPath $claude) { $claude } else { 'not installed' }))
     Write-Host "  Config file:  $config"
     Write-Host "    claudeConfigDir = data"
-    Write-Host "    claudePath      = bin/$script:TargetArch/$script:TargetPlatform/claude*"
+    Write-Host '    claudePath      = bin/{arch}/{platform}/claude*'
     if ($script:TargetPlatform -ne 'windows') {
         Write-Host ''
         Write-Warn "This is the $script:TargetPlatform $script:TargetArch build; it cannot run on this Windows host."

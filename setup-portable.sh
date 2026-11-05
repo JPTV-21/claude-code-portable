@@ -6,18 +6,19 @@
 #   1. Detect the current operating system and CPU architecture
 #      Windows / macOS / Linux, x64 / arm64 (musl is detected on Linux)
 #   2. Download the latest ClaudeX and Claude Code from GitHub Releases
-#      - ClaudeX goes into the script folder as ./ClaudeX[.exe]
-#      - Claude Code goes into ./bin/<arch>/<platform>/claude[.exe]
+#      - ClaudeX goes into the script folder as ./ClaudeX-<platform>-<arch>[.exe]
+#      - Claude Code goes into ./bin/<arch>/<platform>/claude[.exe],
+#        where <arch> uses ClaudeX's names (x86_64 / arm64)
 #   3. Run ClaudeX once to generate claudex-config.json, then close it
-#   4. Point claudeConfigDir at data and claudePath at the portable Claude binary
-#      bin/<arch>/<platform>/claude*
+#   4. Point claudeConfigDir at data and claudePath at
+#      bin/{arch}/{platform}/claude* so ClaudeX resolves the host target
 #
 # Directory layout (relative to the script folder):
-#   ./ClaudeX[.exe]                      ClaudeX launcher
+#   ./ClaudeX-<platform>-<arch>[.exe]    ClaudeX launcher
 #   ./claudex-config.json                launcher configuration
 #   ./data/                              portable CLAUDE_CONFIG_DIR
 #   ./data/tmp/                          portable temporary folder
-#   ./bin/<arch>/<platform>/claude*      Claude Code binary
+#   ./bin/<arch>/<platform>/claude*      Claude Code binary (arch: x86_64 / arm64)
 #
 # Platform support:
 #   - Linux / macOS: run with the system POSIX sh
@@ -101,6 +102,7 @@ LIBC=""
 PLATFORM_LABEL=""
 CLAUDE_EXE=""
 CLAUDEX_EXE=""
+CLAUDE_ARCH=""
 CLAUDE_DEST=""
 CLAUDE_BIN=""
 CLAUDE_MARKER=""
@@ -463,6 +465,15 @@ detect_platform() {
     apply_platform_vars
 }
 
+# Release assets use x64/arm64, but ClaudeX resolves {arch} to x86_64/arm64.
+# Folders under bin/ follow the ClaudeX names so the {arch} template matches.
+claudex_arch_name() {
+    case "$1" in
+        x64) printf 'x86_64' ;;
+        *) printf '%s' "$1" ;;
+    esac
+}
+
 # Recompute every path after the interactive platform/arch/directory choices.
 apply_platform_vars() {
     [ "$OS" = "linux" ] || LIBC="glibc"
@@ -487,12 +498,15 @@ apply_platform_vars() {
     CLAUDEX_EXE="ClaudeX-$OS-$ARCH"
     [ "$OS" = "windows" ] && CLAUDEX_EXE="$CLAUDEX_EXE.exe"
 
-    CLAUDE_DEST="$ROOT/bin/$ARCH/$OS"
+    CLAUDE_ARCH=$(claudex_arch_name "$ARCH")
+    CLAUDE_DEST="$ROOT/bin/$CLAUDE_ARCH/$OS"
     CLAUDE_BIN="$CLAUDE_DEST/$CLAUDE_EXE"
     CLAUDE_MARKER="$CLAUDE_DEST/.claude-version"
     CLAUDEX_BIN="$ROOT/$CLAUDEX_EXE"
     CLAUDEX_MARKER="$ROOT/.claudex-version-$OS-$ARCH"
-    CLAUDE_PATH_CONFIG="bin/$ARCH/$OS/claude*"
+    # Let ClaudeX expand {arch}/{platform} so a folder prepared on one machine
+    # still resolves correctly when it is moved to the target machine.
+    CLAUDE_PATH_CONFIG="bin/{arch}/{platform}/claude*"
     CONFIG_FILE="$ROOT/$CONFIG_NAME"
     DATA_DIR="$ROOT/data"
     PORTABLE_TEMP_DIR="$ROOT/data/tmp"
